@@ -1,0 +1,44 @@
+diff --git a/co/bitset.h b/co/bitset.h
+index ceba5e4..41559c3 100644
+--- a/co/bitset.h
++++ b/co/bitset.h
+@@ -76,7 +76,7 @@ inline std::uint32_t BitSet::Allocate() {
+ 
+ inline void BitSet::Free(std::uint32_t bit) {
+   std::uint32_t word = bit / 64;
+-  if (word < 0 || word >= bits_.size()) {
++  if (word >= bits_.size()) {
+     return;
+   }
+   std::uint32_t b = bit % 64;
+@@ -85,7 +85,7 @@ inline void BitSet::Free(std::uint32_t bit) {
+ 
+ inline void BitSet::Set(std::uint32_t bit) {
+   std::uint32_t word = bit / 64;
+-  if (word < 0 || word >= bits_.size()) {
++  if (word >= bits_.size()) {
+     return;
+   }
+   std::uint32_t b = bit % 64;
+@@ -103,7 +103,7 @@ inline bool BitSet::IsEmpty() const {
+ 
+ inline bool BitSet::Contains(std::uint32_t bit) const {
+   std::uint32_t word = bit / 64;
+-  if (word < 0 || word >= bits_.size()) {
++  if (word >= bits_.size()) {
+     return false;
+   }
+   std::uint32_t b = bit % 64;
+diff --git a/co/coroutine.h b/co/coroutine.h
+index 6667f17..06447ab 100644
+--- a/co/coroutine.h
++++ b/co/coroutine.h
+@@ -672,7 +672,7 @@ public:
+ 
+   // Subclass can override this to provide custom behavior on coroutine
+   // resumption.
+-  virtual void OnResume(const Coroutine *c) {}
++  virtual void OnResume(const Coroutine */*c*/) {}
+ 
+   int GetEpollFd() const {
+ #if CO_POLL_MODE == CO_POLL_EPOLL

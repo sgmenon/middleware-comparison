@@ -1,0 +1,56 @@
+# Common build settings
+# Enable Bzlmod for every Bazel command
+common  --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc11
+common --platforms=@bazel-toolchains//platforms:x86_64_linux_gcc11
+common --extra_toolchains=@gcc_toolchain_x86_64-gcc11//:cc_toolchain
+common --compilation_mode=fastbuild
+common --features=c++20
+
+build:opt --compilation_mode=opt
+
+build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc13
+build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc11//:cc_toolchain
+
+# Platform specific configurations
+# gm_platforms exposes constraint_values under //bsp:* and platform() targets at //:*.
+build:qc --platforms=@gm_platforms//:aarch64_linux_qc8797
+build:qc --platform_suffix=qc
+build:qc --extra_toolchains=@gcc_toolchain_aarch64-gcc13//:cc_toolchain
+build:qc --extra_toolchains=@gcc_toolchain_aarch64-gcc13//:fortran_toolchain
+
+
+# gm_platforms has //bsp:nvidia_thor as a constraint only; platform lives in this repo.
+build:thor --platforms=@gm_platforms//:aarch64_linux_nvidia_thor
+build:thor --extra_toolchains=@gcc_toolchain_aarch64-gcc13//:cc_toolchain
+build:thor --extra_toolchains=@gcc_toolchain_aarch64-gcc13//:fortran_toolchain
+
+# Sanitizer configurations (Intel/x86 unit tests in CI)
+build:asan --features asan
+build:asan --compilation_mode=fastbuild
+build:asan --strip never
+build:asan --action_env ASAN_OPTIONS=detect_leaks=0:color=always
+build:asan --platform_suffix=asan
+
+build:lsan --features lsan
+build:lsan --compilation_mode=fastbuild
+build:lsan --strip never
+build:lsan --action_env LSAN_OPTIONS=verbosity=1:log_threads=1:report_objects=1
+build:lsan --platform_suffix=lsan
+
+build:tsan --features tsan
+build:tsan --compilation_mode=fastbuild
+build:tsan --strip never
+build:tsan --action_env TSAN_OPTIONS=verbosity=3:halt_on_error=1:second_deadlock_stack=1
+build:tsan --platform_suffix=tsan
+
+build:ubsan --features ubsan
+build:ubsan --compilation_mode=fastbuild
+build:ubsan --strip never
+build:ubsan --action_env UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+build:ubsan --platform_suffix=ubsan
+
+build:debug --compilation_mode=dbg
+build:debug --strip never
+build:debug --platform_suffix=debug
+
+try-import %workspace%/user.bazelrc

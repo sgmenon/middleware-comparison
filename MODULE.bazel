@@ -1,0 +1,82 @@
+"""Module definition for a Middleware Benchmark."""
+
+module(
+    name = "mw_benchmark",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.18")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "spdlog", version = "1.15.3")
+bazel_dep(name = "boost.mqtt5", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.asio", version = "1.90.0.bcr.1")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "abseil-cpp", version = "20260526.0")
+bazel_dep(name = "protobuf", version = "36.0-rc2")
+
+# crc32c - we can't use the version from the bazel central registry since the registry's BUILD file is terrible
+# bazel_dep(name = "crc32c", version = "1.1.0")
+non_module_crc32c_repositories = use_extension("//third_party/crc32c:extension.bzl", "crc32c_ext")
+use_repo(
+    non_module_crc32c_repositories,
+    "crc32c",
+)
+
+# Cyclone DDS + iceoryx
+non_module_icoeryx_repositories = use_extension("//third_party/iceoryx:extension.bzl", "third_party")
+use_repo(
+    non_module_icoeryx_repositories,
+    "iceoryx",
+)
+
+non_module_cyclonedds_repositories = use_extension("//third_party/cyclonedds:extension.bzl", "third_party")
+use_repo(
+    non_module_cyclonedds_repositories,
+    "cyclonedds",
+    "cyclonedds-cxx",
+)
+
+# Subspace
+non_module_subspace_repositories = use_extension("//third_party/subspace:extension.bzl", "subspace_ext")
+use_repo(
+    non_module_subspace_repositories,
+    "subspace",
+)
+
+bazel_dep(name = "bazel-toolchains", version = "1.0.0", dev_dependency = True)
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5", dev_dependency = True)
+
+archive_override(
+    module_name = "bazel-toolchains",
+    sha256 = "d24974390cca9f9de91b28ec98baae02d87785f9a36fa66035320f61378b6c38",
+    strip_prefix = "bazel-toolchains-1.0.0",
+    url = "https://github.com/sgmenon/bazel-toolchains/archive/refs/tags/v1.0.0.tar.gz",
+)
+
+gcc_toolchain_extension = use_extension("@bazel-toolchains//gcc_toolchain:toolchain_extension.bzl", "gcc_toolchain_extension", dev_dependency = True)
+
+[
+    [
+        [
+            gcc_toolchain_extension.load_toolchain(
+                arch = arch,
+                gcc_version = gcc_version,
+            ),
+            use_repo(
+                gcc_toolchain_extension,
+                "gcc_toolchain_{arch}-{gcc_version}".format(
+                    arch = arch,
+                    gcc_version = gcc_version,
+                ),
+            ),
+        ]
+        for arch in [
+            "x86_64",
+            "aarch64",
+        ]
+    ]
+    for gcc_version in [
+        "gcc11",
+    ]
+]

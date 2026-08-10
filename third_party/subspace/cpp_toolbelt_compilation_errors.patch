@@ -1,0 +1,67 @@
+diff --git a/toolbelt/color.h b/toolbelt/color.h
+index 39db22c..47e2885 100644
+--- a/toolbelt/color.h
++++ b/toolbelt/color.h
+@@ -59,17 +59,17 @@ struct Color {
+ 
+ // Make a 3-bit fixed color.
+ inline Color MakeFixed(FixedColor color, Modifier mod = kNormal) {
+-  return Color{.mod = mod, .fixed = color};
++  return Color{.mod = mod, .fixed = color, .eight = 0, .r = 0, .g = 0, .b = 0};
+ }
+ 
+ // Make an RGB color.  Beware that this isn't very well supported.
+ inline Color MakeRGB(int r, int g, int b) {
+-  return Color{.mod = kRGB, .r = r, .g = g, .b = b};
++  return Color{.mod = kRGB, .fixed = FixedColor::kNotSet, .eight = 0, .r = r, .g = g, .b = b};
+ }
+ 
+ // Make an 8-bit color.  Usually supported well.
+ // See https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit
+-inline Color Make8Bit(int x) { return Color{.mod = k8bit, .eight = x}; }
++inline Color Make8Bit(int x) { return Color{.mod = k8bit, .fixed = FixedColor::kNotSet, .eight = x, .r = 0, .g = 0, .b = 0}; }
+ 
+ // Shortcuts for fixed colors to save your carpal tunnel.
+ inline Color Black() { return MakeFixed(FixedColor::kGreen); }
+diff --git a/toolbelt/fd.h b/toolbelt/fd.h
+index 19619d8..5760b56 100644
+--- a/toolbelt/fd.h
++++ b/toolbelt/fd.h
+@@ -98,9 +98,9 @@ public:
+   // Construct and return a struct pollfd suitable for use in ::poll.
+   struct pollfd GetPollFd() {
+     if (data_ == nullptr) {
+-      return {.fd = -1, .events = POLLIN};
++      return {.fd = -1, .events = POLLIN, .revents = 0};
+     }
+-    return {.fd = data_->fd, .events = POLLIN};
++    return {.fd = data_->fd, .events = POLLIN, .revents = 0};
+   }
+ 
+   bool operator==(const FileDescriptor &fd) const {
+diff --git a/toolbelt/sockets.h b/toolbelt/sockets.h
+index 50b02b2..0dad665 100644
+--- a/toolbelt/sockets.h
++++ b/toolbelt/sockets.h
+@@ -283,7 +283,7 @@ public:
+     return std::visit(
+         EyeOfNewt{[](const InetAddress &a) { return int(a.Port()); },
+                   [](const VirtualAddress &a) { return int(a.Port()); },
+-                  [](const std::string &a) { return 0; }},
++                  [](const std::string & /*a*/) { return 0; }},
+         address_);
+   }
+ 
+diff --git a/toolbelt/triggerfd.h b/toolbelt/triggerfd.h
+index b248e7d..2d745c4 100644
+--- a/toolbelt/triggerfd.h
++++ b/toolbelt/triggerfd.h
+@@ -60,7 +60,7 @@ class TriggerFd {
+   FileDescriptor &GetTriggerFd() { return trigger_fd_; }
+ 
+   void AddPollFd(std::vector<struct pollfd> &fds) {
+-    fds.push_back({.fd = poll_fd_.Fd(), .events = 0});
++    fds.push_back({.fd = poll_fd_.Fd(), .events = 0, .revents = 0});
+   }
+ 
+  private:
