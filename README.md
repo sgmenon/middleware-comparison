@@ -198,59 +198,118 @@ This is a first pass from docs and APIs, not from our own benches.
 
 ## Benchmarks
 
-### Simple Ping/Pong with shared memory
+Critical path is **publish → subscribe** one-way time: `send_ns` is stamped immediately before publish, and each timed sample ends when the subscriber takes that message (`UseManualTime`). Google Benchmark **Time** is the mean; **min_ns / median_ns / p99_ns / max_ns** counters summarize the per-message distribution.
 
-Paced **reliable ping-pong** latency (publish → wait for matching sample → next). No blast traffic, so we don't force best-effort drops.
+Two shapes (size sweeps below):
+
+1. **ReliablePingPong** — paced, one-in-flight (put → matching take → next). Sizes: 64 B → 4 MiB.
+2. **MtReliableOneWay / MtUnreliableOneWay** — publisher thread + subscriber thread, credit-limited to 2 in flight. Sizes: **1 KiB → 4 MiB** (no 64 B — too small to be representative under concurrent load). Unreliable uses best-effort / DROP.
 
 ```bash
 # Cyclone UDP + Cyclone+iceoryx SHM (RouDi started automatically)
-bazel run //benchmarks:cyclone_bench -- --benchmark_filter=CycloneUdp
-bazel run //benchmarks:cyclone_bench -- --benchmark_filter=CycloneShm
+bazel run //benchmarks:cyclone_bench -- --benchmark_filter=CycloneShm/Mt
+bazel run //benchmarks:cyclone_bench -- --benchmark_filter=ReliablePingPong
 
-# Zenoh SHM one-way (two in-process sessions; no same-session loopback)
-bazel run //benchmarks:zenoh_bench
+# Zenoh SHM (two in-process sessions; no same-session loopback)
+bazel run //benchmarks:zenoh_bench -- --benchmark_filter=Mt
 
-# Subspace (in-process server, reliable pub/sub)
-bazel run //benchmarks:subspace_bench
+# Subspace (in-process server)
+bazel run //benchmarks:subspace_bench -- --benchmark_filter=Mt
 ```
 
-Payload sizes: 64 / 1KiB / 16KiB / 64KiB. Use `--config=opt` for less noisy numbers.
+Use `--config=opt` for less noisy numbers. For aggregates across repeats: `--benchmark_repetitions=5 --benchmark_report_aggregates_only`.
 
-```txt
--------------------------------------------------------------------------------------------------------------------
-Benchmark                                                         Time             CPU   Iterations UserCounters...
--------------------------------------------------------------------------------------------------------------------
-CycloneShmFixture/ReliablePingPong/bytes:64/real_time           145 us         60.2 us        10000 bytes_per_second=430.204Ki/s items_per_second=6.88326k/s
-CycloneShmFixture/ReliablePingPong/bytes:1024/real_time         155 us         62.2 us        10000 bytes_per_second=6.31466Mi/s items_per_second=6.46621k/s
-CycloneShmFixture/ReliablePingPong/bytes:16384/real_time        179 us         73.3 us        11988 bytes_per_second=87.422Mi/s items_per_second=5.59501k/s
-CycloneShmFixture/ReliablePingPong/bytes:65536/real_time        237 us         89.2 us        10950 bytes_per_second=263.639Mi/s items_per_second=4.21822k/s
+### Legend
 
+|                                     | Meaning                                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| **Subspace**                        | In-process Subspace server + two clients, shm channel                              |
+| **Cyclone + iceoryx / Cyclone SHM** | Cyclone DDS with shared memory via iceoryx (RouDi)                                 |
+| **Zenoh (2-session SHM)**           | Two Zenoh peer sessions on loopback, `Z_LOCALITY_REMOTE`, POSIX SHM payloads       |
+| **ReliablePingPong**                | Paced, one-in-flight: publish → wait for matching seq → next                       |
+| **MtReliableOneWay**                | Pub + sub threads, reliable, ≤2 in flight; latency = stamp→take                    |
+| **MtUnreliableOneWay**              | Same shape, best-effort / DROP; latency only over delivered samples                |
+| **Mean / Time**                     | Average one-way publish→subscribe latency                                          |
+| **p50 / p99**                       | Median and 99th percentile of per-message one-way samples                          |
+| **queued_pct**                      | MT only: share of samples already waiting when the sub looked (drained, not timed) |
+| **queued_lat_ns**                   | MT only: mean age (`now - send_ns`) of those drained queued samples                |
+| **fresh_lat_ns**                    | MT only: mean latency of timed samples that required a wait                        |
+| **wait_ns**                         | MT only: mean time blocked waiting for a fresh sample                              |
 
------------------------------------------------------------------------------------------------------------------
-Benchmark                                                       Time             CPU   Iterations UserCounters...
------------------------------------------------------------------------------------------------------------------
-ZenohShmFixture/ReliablePingPong/bytes:64/real_time           204 us         83.4 us         3360 bytes_per_second=306.987Ki/s items_per_second=4.9118k/s
-ZenohShmFixture/ReliablePingPong/bytes:1024/real_time         214 us         81.6 us         3446 bytes_per_second=4.56083Mi/s items_per_second=4.67029k/s
-ZenohShmFixture/ReliablePingPong/bytes:16384/real_time        205 us         87.3 us         2779 bytes_per_second=76.2038Mi/s items_per_second=4.87704k/s
-ZenohShmFixture/ReliablePingPong/bytes:65536/real_time        215 us         92.3 us         3337 bytes_per_second=290.111Mi/s items_per_second=4.64177k/s
+### Results (ReliablePingPong, same-process SHM)
 
+Mean one-way publish→subscribe latency vs payload size. Same machine, **fastbuild** (not `--config=opt`) — treat as relative, not absolute.
 
------------------------------------------------------------------------------------------------------------------
-Benchmark                                                       Time             CPU   Iterations UserCounters...
------------------------------------------------------------------------------------------------------------------
-SubspaceFixture/ReliablePingPong/bytes:64/real_time          21.0 us         21.0 us        32103 bytes_per_second=2.90195Mi/s items_per_second=47.5456k/s
-SubspaceFixture/ReliablePingPong/bytes:1024/real_time        21.0 us         21.0 us        32093 bytes_per_second=46.4132Mi/s items_per_second=47.5271k/s
-SubspaceFixture/ReliablePingPong/bytes:16384/real_time       21.8 us         21.8 us        31121 bytes_per_second=717.695Mi/s items_per_second=45.9325k/s
-SubspaceFixture/ReliablePingPong/bytes:65536/real_time       24.1 us         24.1 us        27198 bytes_per_second=2.52925Gi/s items_per_second=41.4392k/s
+| Payload | Subspace | Cyclone + iceoryx | Zenoh (2-session SHM) |
+| ------: | -------: | ----------------: | --------------------: |
+|    64 B |    16 µs |             33 µs |                163 µs |
+|   1 KiB |    15 µs |             24 µs |                191 µs |
+|  16 KiB |    16 µs |             34 µs |                161 µs |
+|  64 KiB |    16 µs |             38 µs |                164 µs |
+| 256 KiB |    16 µs |             56 µs |                165 µs |
+|   1 MiB |    16 µs |            492 µs |                166 µs |
+|   4 MiB |    17 µs |           1514 µs |                163 µs |
+
+```mermaid
+---
+config:
+  xyChart:
+    width: 820
+    height: 420
+    showLegend: true
+    legendFontSize: 13
+    legendPadding: 12
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#2563eb, #ea580c, #16a34a"
+---
+xychart-beta
+    title "ReliablePingPong one-way latency (µs)"
+    x-axis [64B, 1KiB, 16KiB, 64KiB, 256KiB, 1MiB]
+    y-axis "µs" 0 --> 550
+    line "Subspace" [16, 16, 16, 16, 16, 16]
+    line "Cyclone+iceoryx" [33, 32, 34, 38, 56, 492]
+    line "Zenoh 2-session" [163, 162, 161, 164, 165, 166]
 ```
 
-Caveats on those numbers: all three are now same-process **one-way** publish→take. Zenoh uses **two sessions** (pub listens, sub connects) with `Z_LOCALITY_REMOTE` so it cannot take the same-session loopback shortcut; SHM still applies across those sessions on one host. Re-run before quoting — the table above still has an older Zenoh RTT capture.
+Chart omits 4 MiB so Cyclone’s ~1.5 ms point doesn’t flatten the other series (see table).
+
+Notice how the `Subspace` chart is flat. This is on purpose. The hot path (publish->subscrib) only writes a 16-byte header into the slot. We skipped filling the body so multi-MiB memset wouldn’t dominate. Zenoh stays flat for the same reason; Cyclone has a serialization so it only blows up at 1–4 MiB when iceoryx/chunking actually hurts.
+
+### Results (1 KiB, critical-path stamp → take)
+
+Featured comparison at **1 KiB**. Mean one-way; p50 / p99 in parentheses.
+
+| Bench              |        Subspace |     Cyclone SHM |          Zenoh SHM |
+| ------------------ | --------------: | --------------: | -----------------: |
+| ReliablePingPong   | 15 µs (14 / 28) | 24 µs (21 / 42) | 191 µs (193 / 243) |
+| MtReliableOneWay   | 15 µs (14 / 25) | 33 µs (34 / 47) | 141 µs (139 / 174) |
+| MtUnreliableOneWay | 15 µs (14 / 26) | 26 µs (26 / 40) | 136 µs (135 / 171) |
+
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 420
+    showLegend: false
+---
+xychart-beta
+    title "1 KiB mean one-way latency (µs)"
+    x-axis ["Sub PingPong", "Cyc PingPong", "Zen PingPong", "Sub MtRel", "Cyc MtRel", "Zen MtRel", "Sub MtUnrel", "Cyc MtUnrel", "Zen MtUnrel"]
+    y-axis "µs" 0 --> 220
+    bar [15, 24, 191, 15, 33, 141, 15, 26, 136]
+```
+
+Caveats: Zenoh uses **two sessions** with `Z_LOCALITY_REMOTE`. Cyclone SHM needs RouDi/iceoryx (pools up to 8 MiB chunks). MT benches credit-limit to 2 in flight for both reliable and unreliable (unbounded unreliable flood hung drain). Fastbuild numbers — re-run with `--config=opt` before quoting externally.
 
 ## Summary / verdict
 
 **For GM SDV2 ADAS on Thor-class HPC, Subspace is the clear pick.**
 
 The deciding factor isn't a microbenchmark — it's design center of gravity. Most of our traffic is **same-ECU shared memory** (lidar, cameras, feature maps). Subspace is built around that: channels _are_ shm slots, serialization-agnostic, external buffers, calm server-side discovery, and channels that survive a broker restart. DDS and Zenoh are excellent **network** middlewares that can _also_ do SHM — via iceoryx loans or `zenoh-shm` — but zero-copy is a special path you have to hold carefully, not the default product shape.
+
+Personally, I also prefer the API simplicity of `subspace` and how it resizes slots for variably sized data. For Cyclone for instance, notice how the config file hard-codes the buffer size and number of slots - making things a lot more rigid for dynamically sized types. Zenoh is similar, though the size is not hard-coded in config it is hard-coded in the C/C++/Rust code.
 
 What the others still buy you:
 
@@ -259,7 +318,7 @@ What the others still buy you:
 
 What we'd still do either way: bridge to **SOME/IP** for classic AUTOSAR MCUs. Subspace doesn't need to run on the micro — it needs to cross that boundary without a dumb copy, which its buffer model is aimed at.
 
-Token latency matches the story: Subspace ~20 µs one-way on shm; Cyclone+iceoryx ~150–240 µs; Zenoh two-session SHM one-way lands in the same ballpark as Cyclone (not the old same-session ~6 µs fake). Design predicted that; the benches just didn't contradict it.
+Token latency matches the story: Subspace ~15 µs one-way at 1 KiB (paced and MT); Cyclone+iceoryx ~24–33 µs; Zenoh two-session SHM ~140–190 µs. Design predicted the Subspace win; the benches don’t contradict it.
 
 ## What's next
 

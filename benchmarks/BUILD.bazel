@@ -18,15 +18,6 @@ cc_library(
     deps = ["@zenoh-cpp"],
 )
 
-cc_binary(
-    name = "zenoh_pong",
-    srcs = ["zenoh_pong.cc"],
-    deps = [
-        ":zenoh_common",
-        "@zenoh-cpp",
-    ],
-)
-
 cc_library(
     name = "bench_idl",
     srcs = ["gen/Bench.c"],
