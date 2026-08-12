@@ -1,2 +1,3 @@
 bazel-*
 user.bazelrc
+notes/zenoh-research.md
