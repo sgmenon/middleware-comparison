@@ -1,0 +1,7 @@
+module Bench {
+  struct Sample {
+    unsigned long long seq;
+    unsigned long long send_ns;
+    sequence<octet> data;
+  };
+};

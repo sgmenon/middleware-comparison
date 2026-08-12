@@ -1,0 +1,76 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+package(default_visibility = ["//visibility:private"])
+
+cc_library(
+    name = "bench_common",
+    hdrs = [
+        "common.h",
+        "process.h",
+    ],
+    includes = ["."],
+)
+
+cc_library(
+    name = "zenoh_common",
+    hdrs = ["zenoh_common.h"],
+    includes = ["."],
+    deps = ["@zenoh-cpp"],
+)
+
+cc_binary(
+    name = "zenoh_pong",
+    srcs = ["zenoh_pong.cc"],
+    deps = [
+        ":zenoh_common",
+        "@zenoh-cpp",
+    ],
+)
+
+cc_library(
+    name = "bench_idl",
+    srcs = ["gen/Bench.c"],
+    hdrs = ["gen/Bench.h"],
+    includes = ["gen"],
+    deps = ["@cyclonedds"],
+)
+
+cc_binary(
+    name = "cyclone_bench",
+    srcs = ["cyclone_bench.cc"],
+    data = [
+        "@iceoryx//:iox_roudi",
+    ],
+    deps = [
+        ":bench_common",
+        ":bench_idl",
+        "@cyclonedds",
+        "@google_benchmark//:benchmark",
+        "@iceoryx",
+    ],
+)
+
+cc_binary(
+    name = "zenoh_bench",
+    srcs = ["zenoh_bench.cc"],
+    deps = [
+        ":bench_common",
+        ":zenoh_common",
+        "@google_benchmark//:benchmark",
+        "@zenoh-cpp",
+    ],
+)
+
+cc_binary(
+    name = "subspace_bench",
+    srcs = ["subspace_bench.cc"],
+    deps = [
+        ":bench_common",
+        "@abseil-cpp//absl/status",
+        "@coroutines//co",
+        "@google_benchmark//:benchmark",
+        "@subspace//client:subspace_client",
+        "@subspace//common/async",
+        "@subspace//server",
+    ],
+)
