@@ -126,6 +126,16 @@ That matters for us because **most of our ADAS traffic is same-ECU**. Lidar fram
 
 When you read the truth table, keep that bias in mind: green cells for zero-copy on DDS/Zenoh often mean “yes, via an SHM sidecar.” On Subspace they mean “that _is_ the product.”
 
+**DDS (network-first):** writers and readers each keep their own history — copies unless you use a vendor SHM/loan API.
+
+![DDS topic with per-endpoint history buffers](docs/figures/dds.png)
+
+**Subspace (shm-first):** the channel _is_ the shared history; the server sets it up, and leaving the machine is a TCP bridge between servers.
+
+![Subspace shared channel with TCP bridge between servers](docs/figures/subspace.png)
+
+Editable sources: [`docs/figures/dds.drawio`](docs/figures/dds.drawio), [`docs/figures/subspace.drawio`](docs/figures/subspace.drawio).
+
 ## Platform support
 
 One thing worth getting straight before people start grading scorecards: **this middleware is for the HPC / ADAS boxes (Linux, QNX), not for the little MCUs.** MCUs already speak SOME/IP (or will, via the bridge). So "runs on a Cortex-M with 64K of RAM" is not a requirement for the candidates below — and Subspace not targeting MCUs is fine by us.
@@ -225,10 +235,3 @@ What the others still buy you:
 - **Zenoh** — nicer protocol surface than DDS, queryables, flexible topology. Still network-first; SHM is negotiated on top of a session. Strong if WAN / robot-to-everything mattered more than same-box ADAS.
 
 What we'd still do either way: bridge to **SOME/IP** for classic AUTOSAR MCUs. Subspace doesn't need to run on the micro — it needs to cross that boundary without a dumb copy, which its buffer model is aimed at.
-
-## What's next
-
-1. Discovery benchmarks.
-2. Big-data benches over SHM and Ethernet.
-
-This repo is the lab bench for that work. More soon.
