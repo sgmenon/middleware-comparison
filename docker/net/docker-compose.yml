@@ -1,0 +1,53 @@
+# Two-container bridge for network RTT/2 benches.
+# Usage: STACK=subspace|zenoh|cyclone docker compose --profile net up --abort-on-container-exit
+name: mw_net
+
+networks:
+  mw_net:
+    driver: bridge
+
+services:
+  sub:
+    profiles: [net]
+    image: mw-benchmark-net:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_net_sub
+    hostname: sub
+    # Subspace maps channel slots in /dev/shm. Default Docker shm is 64MB —
+    # 1 MiB × 32 slots × (req+rep) already exceeds that and SIGBUSes.
+    shm_size: 1gb
+    networks: [mw_net]
+    environment:
+      STACK: ${STACK:-subspace}
+      ROLE: sub
+      SIZE: ${SIZE:-1024}
+      COUNT: ${COUNT:-1000}
+      CHANNEL: ${CHANNEL:-bench/net}
+      WARMUP: ${WARMUP:-50}
+      PEER: ${SUB_PEER:-}
+    # Sub stays up until compose tears down after pub exits.
+    stop_grace_period: 2s
+
+  pub:
+    profiles: [net]
+    image: mw-benchmark-net:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_net_pub
+    hostname: pub
+    shm_size: 1gb
+    networks: [mw_net]
+    depends_on:
+      - sub
+    environment:
+      STACK: ${STACK:-subspace}
+      ROLE: pub
+      SIZE: ${SIZE:-1024}
+      COUNT: ${COUNT:-1000}
+      CHANNEL: ${CHANNEL:-bench/net}
+      WARMUP: ${WARMUP:-50}
+      PEER: ${PEER:-}
+    # Default PEER filled by entrypoint per STACK if empty.

@@ -1,4 +1,5 @@
 module Bench {
+  // Logical twin of benchmarks/Bench.fbs (FlatBuffers for Zenoh/Subspace).
   struct Sample {
     unsigned long long seq;
     unsigned long long send_ns;

@@ -1,3 +1,4 @@
+#include "bench_sample.h"
 #include "common.h"
 
 #include <benchmark/benchmark.h>
@@ -15,8 +16,12 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include "flatbuffers/flatbuffers.h"
 
 namespace {
 
@@ -103,8 +108,8 @@ void RunPingPong(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
         return;
     }
 
-    auto pub_or = pub_client.CreatePublisher(channel, static_cast<int>(size), mw_bench::kNumSlots,
-                                             subspace::PublisherOptions().SetReliable(reliable));
+    const int slot_bytes = static_cast<int>(mw_bench::SampleSlotBytes(size));
+    auto pub_or = pub_client.CreatePublisher(channel, slot_bytes, mw_bench::kNumSlots, subspace::PublisherOptions().SetReliable(reliable));
     if (!pub_or.ok()) {
         state.SkipWithError(pub_or.status().ToString().c_str());
         return;
@@ -122,27 +127,31 @@ void RunPingPong(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
     auto pub = std::move(pub_or).value();
     auto sub = std::move(sub_or).value();
 
+    flatbuffers::FlatBufferBuilder fbb;
     uint64_t seq = 0;
     std::vector<double> lats;
     lats.reserve(4096);
     for (auto _ : state) {
         ++seq;
+        mw_bench::BuildSample(fbb, seq, size);
+        const auto nbytes = static_cast<int32_t>(fbb.GetSize());
 
-        auto buf_or = pub.GetMessageBuffer(static_cast<int32_t>(size));
+        auto buf_or = pub.GetMessageBuffer(nbytes);
         if (!buf_or.ok()) {
             auto w = pub.Wait();
             if (!w.ok()) {
                 state.SkipWithError(w.ToString().c_str());
                 break;
             }
-            buf_or = pub.GetMessageBuffer(static_cast<int32_t>(size));
+            buf_or = pub.GetMessageBuffer(nbytes);
         }
         if (!buf_or.ok()) {
             state.SkipWithError(buf_or.status().ToString().c_str());
             break;
         }
-        mw_bench::WriteHeader(*buf_or, seq);
-        auto pub_st = pub.PublishMessage(static_cast<int32_t>(size));
+        std::memcpy(*buf_or, fbb.GetBufferPointer(), static_cast<std::size_t>(nbytes));
+        mw_bench::StampSample(*buf_or);
+        auto pub_st = pub.PublishMessage(nbytes);
         if (!pub_st.ok()) {
             state.SkipWithError(pub_st.status().ToString().c_str());
             break;
@@ -163,13 +172,14 @@ void RunPingPong(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
                 }
                 continue;
             }
-            if (msg.length < sizeof(mw_bench::MessageHeader)) {
-                state.SkipWithError("short message");
+            uint64_t got_seq = 0;
+            uint64_t send_ns = 0;
+            if (!mw_bench::ReadSampleMeta(msg.buffer, static_cast<std::size_t>(msg.length), &got_seq, &send_ns)) {
+                state.SkipWithError("invalid FlatBuffer sample");
                 goto done;
             }
-            const auto* hdr = mw_bench::HeaderOf(msg.buffer);
-            if (hdr->seq == seq) {
-                const double sec = mw_bench::OneWayLatencySec(hdr->send_ns);
+            if (got_seq == seq) {
+                const double sec = mw_bench::OneWayLatencySec(send_ns);
                 lats.push_back(sec);
                 state.SetIterationTime(sec);
                 break;
@@ -204,8 +214,8 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
         return;
     }
 
-    auto pub_or =
-        pub_client.CreatePublisher(channel, static_cast<int>(size), mw_bench::kMtSlots, subspace::PublisherOptions().SetReliable(reliable));
+    const int slot_bytes = static_cast<int>(mw_bench::SampleSlotBytes(size));
+    auto pub_or = pub_client.CreatePublisher(channel, slot_bytes, mw_bench::kMtSlots, subspace::PublisherOptions().SetReliable(reliable));
     if (!pub_or.ok()) {
         state.SkipWithError(pub_or.status().ToString().c_str());
         return;
@@ -233,13 +243,16 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
     mw_bench::MtTakeStats take_stats;
 
     std::thread pub_thread([&]() {
+        flatbuffers::FlatBufferBuilder fbb;
         while (!stop.load(std::memory_order_relaxed)) {
             if (max_in_flight > 0 && in_flight.load(std::memory_order_acquire) >= max_in_flight) {
                 std::this_thread::yield();
                 continue;
             }
             const uint64_t s = seq.fetch_add(1, std::memory_order_relaxed) + 1;
-            auto buf_or = pub.GetMessageBuffer(static_cast<int32_t>(size));
+            mw_bench::BuildSample(fbb, s, size);
+            const auto nbytes = static_cast<int32_t>(fbb.GetSize());
+            auto buf_or = pub.GetMessageBuffer(nbytes);
             if (!buf_or.ok()) {
                 break;
             }
@@ -254,9 +267,9 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
                 }
                 continue;
             }
-            auto* raw = static_cast<char*>(*buf_or);
-            mw_bench::WriteHeader(raw, s);
-            auto pub_st = pub.PublishMessage(static_cast<int32_t>(size));
+            std::memcpy(*buf_or, fbb.GetBufferPointer(), static_cast<std::size_t>(nbytes));
+            mw_bench::StampSample(*buf_or);
+            auto pub_st = pub.PublishMessage(nbytes);
             if (!pub_st.ok()) {
                 break;
             }
@@ -279,11 +292,12 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
             if (msg.length == 0) {
                 break;
             }
-            if (msg.length < sizeof(mw_bench::MessageHeader)) {
-                state.SkipWithError("short message");
+            uint64_t send_ns = 0;
+            if (!mw_bench::ReadSampleMeta(msg.buffer, static_cast<std::size_t>(msg.length), nullptr, &send_ns)) {
+                state.SkipWithError("invalid FlatBuffer sample");
                 goto mt_done;
             }
-            const double e2e = mw_bench::OneWayLatencySec(mw_bench::HeaderOf(msg.buffer)->send_ns);
+            const double e2e = mw_bench::OneWayLatencySec(send_ns);
             take_stats.Record(e2e, /*was_queued=*/true, /*wait_sec=*/0.0);
             int cur = in_flight.load(std::memory_order_relaxed);
             while (cur > 0 && !in_flight.compare_exchange_weak(cur, cur - 1, std::memory_order_release, std::memory_order_relaxed)) {}
@@ -293,7 +307,7 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         uint64_t wait_ns = 0;
         bool got = false;
-        const mw_bench::MessageHeader* hdr = nullptr;
+        uint64_t send_ns = 0;
         while (std::chrono::steady_clock::now() < deadline) {
             auto msg_or = sub.ReadMessage();
             if (!msg_or.ok()) {
@@ -333,11 +347,10 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
                     continue;
                 }
             }
-            if (msg.length < sizeof(mw_bench::MessageHeader)) {
-                state.SkipWithError("short message");
+            if (!mw_bench::ReadSampleMeta(msg.buffer, static_cast<std::size_t>(msg.length), nullptr, &send_ns)) {
+                state.SkipWithError("invalid FlatBuffer sample");
                 goto mt_done;
             }
-            hdr = mw_bench::HeaderOf(msg.buffer);
             got = true;
             break;
         }
@@ -345,7 +358,7 @@ void RunMtOneWay(SubspaceFixture& fix, benchmark::State& state, bool reliable) {
             state.SkipWithError("timed out waiting for fresh sample");
             break;
         }
-        const double e2e = mw_bench::OneWayLatencySec(hdr->send_ns);
+        const double e2e = mw_bench::OneWayLatencySec(send_ns);
         const bool was_queued = (wait_ns == 0);
         take_stats.Record(e2e, was_queued, static_cast<double>(wait_ns) * 1e-9);
         lats.push_back(e2e);

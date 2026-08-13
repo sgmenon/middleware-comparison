@@ -113,16 +113,6 @@ int WriteSample(dds_entity_t writer, uint64_t seq, const std::vector<char>& payl
     return dds_write(writer, &sample);
 }
 
-constexpr const char* kUdpConfig = R"(<?xml version="1.0" encoding="UTF-8" ?>
-<CycloneDDS>
-  <Domain id="any">
-    <SharedMemory>
-      <Enable>false</Enable>
-    </SharedMemory>
-  </Domain>
-</CycloneDDS>
-)";
-
 constexpr const char* kShmConfig = R"(<?xml version="1.0" encoding="UTF-8" ?>
 <CycloneDDS>
   <Domain id="any">
@@ -179,42 +169,14 @@ count = 16
 
 [[segment.mempool]]
 size = 4194304
-count = 16
+count = 64
 
 [[segment.mempool]]
 size = 8388608
-count = 8
+count = 64
 )";
 
 }  // namespace
-
-class CycloneUdpFixture : public benchmark::Fixture {
-   public:
-    void SetUp(const ::benchmark::State&) override {
-        if (participant_ > 0) {
-            return;
-        }
-        config_path_ = mw_bench::WriteTempFile("cyclone_udp", kUdpConfig);
-        ::setenv("CYCLONEDDS_URI", ("file://" + config_path_).c_str(), 1);
-        participant_ = dds_create_participant(DDS_DOMAIN_DEFAULT, nullptr, nullptr);
-        if (participant_ < 0) {
-            throw std::runtime_error("udp: dds_create_participant failed");
-        }
-    }
-
-    static void Shutdown() {
-        if (participant_ > 0) {
-            dds_delete(participant_);
-            participant_ = 0;
-        }
-    }
-
-    dds_entity_t Participant() const { return participant_; }
-
-   private:
-    inline static dds_entity_t participant_{0};
-    inline static std::string config_path_;
-};
 
 class CycloneShmFixture : public benchmark::Fixture {
    public:
@@ -278,8 +240,7 @@ class CycloneShmFixture : public benchmark::Fixture {
     inline static std::unique_ptr<mw_bench::ChildProcess> roudi_;
 };
 
-template <typename Fixture>
-void RunPingPong(Fixture& fix, benchmark::State& state, const char* prefix, bool reliable) {
+void RunPingPong(dds_entity_t pp, benchmark::State& state, const char* prefix, bool reliable) {
     const std::size_t size = static_cast<std::size_t>(state.range(0));
     const std::string topic_name = std::string(prefix) + "_pp_" + std::to_string(static_cast<int>(reliable)) + "_" + std::to_string(size) +
                                    "_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
@@ -287,9 +248,9 @@ void RunPingPong(Fixture& fix, benchmark::State& state, const char* prefix, bool
     dds_qos_t* qos = dds_create_qos();
     SetQos(qos, reliable);
 
-    dds_entity_t topic = dds_create_topic(fix.Participant(), &Bench_Sample_desc, topic_name.c_str(), nullptr, nullptr);
-    dds_entity_t writer = dds_create_writer(fix.Participant(), topic, qos, nullptr);
-    dds_entity_t reader = dds_create_reader(fix.Participant(), topic, qos, nullptr);
+    dds_entity_t topic = dds_create_topic(pp, &Bench_Sample_desc, topic_name.c_str(), nullptr, nullptr);
+    dds_entity_t writer = dds_create_writer(pp, topic, qos, nullptr);
+    dds_entity_t reader = dds_create_reader(pp, topic, qos, nullptr);
     dds_delete_qos(qos);
 
     if (topic < 0 || writer < 0 || reader < 0) {
@@ -305,7 +266,7 @@ void RunPingPong(Fixture& fix, benchmark::State& state, const char* prefix, bool
     dds_sample_info_t infos[1];
     samples[0] = Bench_Sample__alloc();
 
-    dds_entity_t waitset = dds_create_waitset(fix.Participant());
+    dds_entity_t waitset = dds_create_waitset(pp);
     dds_entity_t rdcond = dds_create_readcondition(reader, DDS_ANY_SAMPLE_STATE | DDS_ANY_VIEW_STATE | DDS_ANY_INSTANCE_STATE);
     if (waitset < 0 || rdcond < 0 || dds_waitset_attach(waitset, rdcond, reader) < 0) {
         state.SkipWithError("failed to create waitset");
@@ -341,8 +302,7 @@ void RunPingPong(Fixture& fix, benchmark::State& state, const char* prefix, bool
     state.SetItemsProcessed(state.iterations());
 }
 
-template <typename Fixture>
-void RunMtOneWay(Fixture& fix, benchmark::State& state, const char* prefix, bool reliable) {
+void RunMtOneWay(dds_entity_t pp, benchmark::State& state, const char* prefix, bool reliable) {
     const std::size_t size = static_cast<std::size_t>(state.range(0));
     const std::string topic_name = std::string(prefix) + "_mt_" + std::to_string(static_cast<int>(reliable)) + "_" + std::to_string(size) +
                                    "_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
@@ -350,16 +310,16 @@ void RunMtOneWay(Fixture& fix, benchmark::State& state, const char* prefix, bool
     dds_qos_t* qos = dds_create_qos();
     SetQos(qos, reliable);
 
-    dds_entity_t topic = dds_create_topic(fix.Participant(), &Bench_Sample_desc, topic_name.c_str(), nullptr, nullptr);
-    dds_entity_t writer = dds_create_writer(fix.Participant(), topic, qos, nullptr);
-    dds_entity_t reader = dds_create_reader(fix.Participant(), topic, qos, nullptr);
+    dds_entity_t topic = dds_create_topic(pp, &Bench_Sample_desc, topic_name.c_str(), nullptr, nullptr);
+    dds_entity_t writer = dds_create_writer(pp, topic, qos, nullptr);
+    dds_entity_t reader = dds_create_reader(pp, topic, qos, nullptr);
     dds_delete_qos(qos);
 
     if (topic < 0 || writer < 0 || reader < 0) {
         state.SkipWithError("failed to create topic/writer/reader");
         return;
     }
-    if (!WaitMatched(writer, 2000)) {
+    if (!WaitMatched(writer, 5000)) {
         state.SkipWithError("publication not matched");
         return;
     }
@@ -368,7 +328,7 @@ void RunMtOneWay(Fixture& fix, benchmark::State& state, const char* prefix, bool
     dds_sample_info_t infos[1];
     samples[0] = Bench_Sample__alloc();
 
-    dds_entity_t waitset = dds_create_waitset(fix.Participant());
+    dds_entity_t waitset = dds_create_waitset(pp);
     dds_entity_t rdcond = dds_create_readcondition(reader, DDS_ANY_SAMPLE_STATE | DDS_ANY_VIEW_STATE | DDS_ANY_INSTANCE_STATE);
     if (waitset < 0 || rdcond < 0 || dds_waitset_attach(waitset, rdcond, reader) < 0) {
         state.SkipWithError("failed to create waitset");
@@ -453,39 +413,21 @@ mt_done:
     state.SetItemsProcessed(state.iterations());
 }
 
-BENCHMARK_DEFINE_F(CycloneUdpFixture, ReliablePingPong)
-(benchmark::State& state) {
-    RunPingPong(*this, state, "udp", /*reliable=*/true);
-}
-BENCHMARK_REGISTER_F(CycloneUdpFixture, ReliablePingPong)->Apply(mw_bench::PingPongArgs);
-
-BENCHMARK_DEFINE_F(CycloneUdpFixture, MtReliableOneWay)
-(benchmark::State& state) {
-    RunMtOneWay(*this, state, "udp", /*reliable=*/true);
-}
-BENCHMARK_REGISTER_F(CycloneUdpFixture, MtReliableOneWay)->Apply(mw_bench::OneWayLatencyArgs);
-
-BENCHMARK_DEFINE_F(CycloneUdpFixture, MtUnreliableOneWay)
-(benchmark::State& state) {
-    RunMtOneWay(*this, state, "udp", /*reliable=*/false);
-}
-BENCHMARK_REGISTER_F(CycloneUdpFixture, MtUnreliableOneWay)->Apply(mw_bench::OneWayLatencyArgs);
-
 BENCHMARK_DEFINE_F(CycloneShmFixture, ReliablePingPong)
 (benchmark::State& state) {
-    RunPingPong(*this, state, "shm", /*reliable=*/true);
+    RunPingPong(Participant(), state, "shm", /*reliable=*/true);
 }
 BENCHMARK_REGISTER_F(CycloneShmFixture, ReliablePingPong)->Apply(mw_bench::PingPongArgs);
 
 BENCHMARK_DEFINE_F(CycloneShmFixture, MtReliableOneWay)
 (benchmark::State& state) {
-    RunMtOneWay(*this, state, "shm", /*reliable=*/true);
+    RunMtOneWay(Participant(), state, "shm", /*reliable=*/true);
 }
 BENCHMARK_REGISTER_F(CycloneShmFixture, MtReliableOneWay)->Apply(mw_bench::OneWayLatencyArgs);
 
 BENCHMARK_DEFINE_F(CycloneShmFixture, MtUnreliableOneWay)
 (benchmark::State& state) {
-    RunMtOneWay(*this, state, "shm", /*reliable=*/false);
+    RunMtOneWay(Participant(), state, "shm", /*reliable=*/false);
 }
 BENCHMARK_REGISTER_F(CycloneShmFixture, MtUnreliableOneWay)->Apply(mw_bench::OneWayLatencyArgs);
 
@@ -496,7 +438,6 @@ int main(int argc, char** argv) {
     }
     benchmark::RunSpecifiedBenchmarks();
     CycloneShmFixture::Shutdown();
-    CycloneUdpFixture::Shutdown();
     benchmark::Shutdown();
     return 0;
 }

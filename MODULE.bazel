@@ -19,6 +19,17 @@ bazel_dep(name = "google_benchmark", version = "1.9.5")
 bazel_dep(name = "zenoh-cpp", version = "1.8.0")
 bazel_dep(name = "subspace", version = "2.9.1")
 bazel_dep(name = "coroutines", version = "3.3.2")
+bazel_dep(name = "flatbuffers", version = "25.2.10")
+
+# flatbuffer_rules/build_defs.bzl loads rules_python at top-level (py helpers).
+bazel_dep(name = "rules_python", version = "1.6.3")
+
+# BCR flatbuffers pulls an old aspect_rules_esbuild that still uses
+# incompatible_use_toolchain_transition (removed in Bazel 9). Force a newer one.
+single_version_override(
+    module_name = "aspect_rules_esbuild",
+    version = "0.27.0",
+)
 
 # zenoh-c registers Rust/LLVM toolchains as dev_dependency; re-register for consumers.
 bazel_dep(name = "rules_rs", version = "0.0.93")

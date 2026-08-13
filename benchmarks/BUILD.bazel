@@ -1,14 +1,20 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//rules/flatbuffer_rules:build_defs.bzl", "flatbuffer_cc_library")
 
-package(default_visibility = ["//visibility:private"])
+package(default_visibility = ["//benchmarks:__subpackages__"])
 
 cc_library(
     name = "bench_common",
     hdrs = [
+        "bench_sample.h",
         "common.h",
         "process.h",
     ],
     includes = ["."],
+    deps = [
+        ":bench_fbs",
+        "@google_benchmark//:benchmark",
+    ],
 )
 
 cc_library(
@@ -18,12 +24,24 @@ cc_library(
     deps = ["@zenoh-cpp"],
 )
 
+# Cyclone DDS IDL (idlc-generated sources checked in under gen/).
 cc_library(
     name = "bench_idl",
     srcs = ["gen/Bench.c"],
     hdrs = ["gen/Bench.h"],
     includes = ["gen"],
     deps = ["@cyclonedds"],
+)
+
+# FlatBuffers mirror of Bench.idl (seq, send_ns, data) for Zenoh/Subspace.
+flatbuffer_cc_library(
+    name = "bench_fbs",
+    srcs = ["Bench.fbs"],
+    flatc_args = [
+        "--no-union-value-namespacing",
+        "--gen-object-api",
+        "--gen-mutable",  # late-stamp send_ns after SHM/slot alloc
+    ],
 )
 
 cc_binary(

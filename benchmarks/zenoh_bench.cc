@@ -1,6 +1,7 @@
 // One-way Zenoh SHM latency, apples-to-apples with Cyclone/Subspace:
 // two sessions in one process (pub listens, sub connects) so traffic cannot
 // use same-session local delivery. Critical path: stamp at put → recv.
+#include "bench_sample.h"
 #include "common.h"
 #include "zenoh_common.h"
 
@@ -16,6 +17,8 @@
 #include <string>
 #include <thread>
 #include <variant>
+
+#include "flatbuffers/flatbuffers.h"
 
 namespace {
 
@@ -71,14 +74,19 @@ class ZenohShmFixture : public benchmark::Fixture {
     Session& SubSession() { return *sub_session_; }
     PosixShmProvider& Provider() { return *provider_; }
 
-    void PutShm(zenoh::Publisher& pub, std::size_t size, uint64_t seq) {
-        auto alloc = provider_->alloc_gc_defrag_blocking(size, AllocAlignment({0}));
+    void PutShm(zenoh::Publisher& pub, std::size_t payload_bytes, uint64_t seq) {
+        // Per-thread builder: MT one-way publishes from a dedicated thread.
+        thread_local flatbuffers::FlatBufferBuilder fbb;
+        mw_bench::BuildSample(fbb, seq, payload_bytes);
+        const auto nbytes = fbb.GetSize();
+        auto alloc = provider_->alloc_gc_defrag_blocking(nbytes, AllocAlignment({0}));
         if (!std::holds_alternative<ZShmMut>(alloc)) {
             throw std::runtime_error("SHM alloc failed");
         }
         ZShmMut buf = std::get<ZShmMut>(std::move(alloc));
-        // Header only — avoid multi-MiB memcpy on the timed path.
-        mw_bench::WriteHeader(buf.data(), seq);
+        // Encode off-path, copy into SHM, then stamp (matches Cyclone: stamp → write).
+        std::memcpy(buf.data(), fbb.GetBufferPointer(), nbytes);
+        mw_bench::StampSample(buf.data());
         pub.put(std::move(buf));
     }
 
@@ -104,9 +112,12 @@ class ZenohShmFixture : public benchmark::Fixture {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         uint64_t warm_seq = 0;
         bool ok = false;
+        thread_local flatbuffers::FlatBufferBuilder warm_fbb;
         while (std::chrono::steady_clock::now() < deadline && warm_seq < 64) {
             ++warm_seq;
-            auto alloc = provider_->alloc_gc_defrag(64, AllocAlignment({0}));
+            mw_bench::BuildSample(warm_fbb, warm_seq, /*payload_bytes=*/16);
+            const auto nbytes = warm_fbb.GetSize();
+            auto alloc = provider_->alloc_gc_defrag(nbytes, AllocAlignment({0}));
             if (!std::holds_alternative<ZShmMut>(alloc)) {
                 // Free pressure: drain anything pending, then retry.
                 while (true) {
@@ -119,7 +130,8 @@ class ZenohShmFixture : public benchmark::Fixture {
                 continue;
             }
             ZShmMut buf = std::get<ZShmMut>(std::move(alloc));
-            mw_bench::WriteHeader(buf.data(), warm_seq);
+            std::memcpy(buf.data(), warm_fbb.GetBufferPointer(), nbytes);
+            mw_bench::StampSample(buf.data());
             pub.put(std::move(buf));
 
             const auto drain_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
@@ -134,7 +146,8 @@ class ZenohShmFixture : public benchmark::Fixture {
                     throw std::runtime_error("warmup payload was not SHM — expected transport SHM path");
                 }
                 auto view = sample.get_payload().as_vector();
-                if (view.size() >= sizeof(mw_bench::MessageHeader) && mw_bench::HeaderOf(view.data())->seq == warm_seq) {
+                uint64_t got_seq = 0;
+                if (mw_bench::ReadSampleMeta(view.data(), view.size(), &got_seq, nullptr) && got_seq == warm_seq) {
                     ok = true;
                     break;
                 }
@@ -154,7 +167,23 @@ class ZenohShmFixture : public benchmark::Fixture {
     inline static std::optional<PosixShmProvider> provider_;
 };
 
-bool RecvMatching(ZenohSub& sub, uint64_t want_seq, int timeout_ms, uint64_t* send_ns_out) {
+// Read FlatBuffer meta from a Zenoh payload (SHM view preferred, bytes fallback).
+bool PayloadMeta(const zenoh::Sample& sample, uint64_t* seq_out, uint64_t* send_ns_out, bool* was_shm_out) {
+    if (sample.get_payload().as_shm().has_value()) {
+        auto shm = sample.get_payload().as_shm();
+        if (was_shm_out != nullptr) {
+            *was_shm_out = true;
+        }
+        return mw_bench::ReadSampleMeta(shm->get().data(), shm->get().len(), seq_out, send_ns_out);
+    }
+    auto view = sample.get_payload().as_vector();
+    if (was_shm_out != nullptr) {
+        *was_shm_out = false;
+    }
+    return mw_bench::ReadSampleMeta(view.data(), view.size(), seq_out, send_ns_out);
+}
+
+bool RecvMatching(ZenohSub& sub, uint64_t want_seq, int timeout_ms, uint64_t* send_ns_out, bool require_shm = false) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         auto res = sub.handler().try_recv();
@@ -163,17 +192,18 @@ bool RecvMatching(ZenohSub& sub, uint64_t want_seq, int timeout_ms, uint64_t* se
             continue;
         }
         auto& sample = std::get<Sample>(res);
-        if (!sample.get_payload().as_shm().has_value()) {
+        uint64_t got_seq = 0;
+        uint64_t send_ns = 0;
+        bool was_shm = false;
+        if (!PayloadMeta(sample, &got_seq, &send_ns, &was_shm)) {
             continue;
         }
-        auto shm = sample.get_payload().as_shm();
-        if (shm->get().len() < sizeof(mw_bench::MessageHeader)) {
+        if (require_shm && !was_shm) {
             continue;
         }
-        const auto* hdr = mw_bench::HeaderOf(shm->get().data());
-        if (want_seq == 0 || hdr->seq == want_seq) {
+        if (want_seq == 0 || got_seq == want_seq) {
             if (send_ns_out != nullptr) {
-                *send_ns_out = hdr->send_ns;
+                *send_ns_out = send_ns;
             }
             return true;
         }
@@ -189,13 +219,9 @@ bool RecvOne(ZenohSub& sub, int timeout_ms, uint64_t* send_ns_out, bool* was_que
         auto res = sub.handler().try_recv();
         if (!std::holds_alternative<zenoh::channels::RecvError>(res)) {
             auto& sample = std::get<Sample>(res);
-            if (sample.get_payload().as_shm().has_value()) {
-                auto shm = sample.get_payload().as_shm();
-                if (shm->get().len() >= sizeof(mw_bench::MessageHeader)) {
-                    *send_ns_out = mw_bench::HeaderOf(shm->get().data())->send_ns;
-                    *was_queued_out = true;
-                    return true;
-                }
+            if (PayloadMeta(sample, nullptr, send_ns_out, nullptr)) {
+                *was_queued_out = true;
+                return true;
             }
         }
     }
@@ -211,14 +237,9 @@ bool RecvOne(ZenohSub& sub, int timeout_ms, uint64_t* send_ns_out, bool* was_que
             continue;
         }
         auto& sample = std::get<Sample>(res);
-        if (!sample.get_payload().as_shm().has_value()) {
+        if (!PayloadMeta(sample, nullptr, send_ns_out, nullptr)) {
             continue;
         }
-        auto shm = sample.get_payload().as_shm();
-        if (shm->get().len() < sizeof(mw_bench::MessageHeader)) {
-            continue;
-        }
-        *send_ns_out = mw_bench::HeaderOf(shm->get().data())->send_ns;
         *was_queued_out = false;
         *wait_ns_out = wait_ns;
         return true;
@@ -226,16 +247,20 @@ bool RecvOne(ZenohSub& sub, int timeout_ms, uint64_t* send_ns_out, bool* was_que
     return false;
 }
 
-bool WaitUntilLinked(ZenohShmFixture& fix, zenoh::Publisher& pub, ZenohSub& sub, std::size_t size) {
+uint64_t WaitUntilLinked(ZenohShmFixture& fix, zenoh::Publisher& pub, ZenohSub& sub, std::size_t size) {
     // Few probes at the real size (multi-MiB × dozens would exhaust the SHM segment).
+    // Return the last successfully linked seq so the timed loop continues from there
+    // (avoids reusing probe seq numbers on a hot channel).
     const uint64_t probes = size > 256 * 1024 ? 4 : 32;
+    // Tiny payloads sometimes demote off the SHM view; still require SHM once above 4 KiB.
+    const bool require_shm = size >= 4096;
     for (uint64_t i = 1; i <= probes; ++i) {
         fix.PutShm(pub, size, i);
-        if (RecvMatching(sub, i, /*timeout_ms=*/500, nullptr)) {
-            return true;
+        if (RecvMatching(sub, i, /*timeout_ms=*/500, nullptr, require_shm)) {
+            return i;
         }
     }
-    return false;
+    return 0;
 }
 
 void RunPingPong(ZenohShmFixture& fix, benchmark::State& state, bool reliable) {
@@ -246,12 +271,12 @@ void RunPingPong(ZenohShmFixture& fix, benchmark::State& state, bool reliable) {
     // Subscriber first so the put cannot race an undeclared interest.
     auto sub = fix.MakeSubscriber(key, /*fifo=*/16);
     auto pub = fix.MakePublisher(key, reliable);
-    if (!WaitUntilLinked(fix, pub, sub, size)) {
+    uint64_t seq = WaitUntilLinked(fix, pub, sub, size);
+    if (seq == 0) {
         state.SkipWithError("zenoh pub/sub failed to link");
         return;
     }
 
-    uint64_t seq = 0;
     std::vector<double> lats;
     lats.reserve(4096);
     for (auto _ : state) {
@@ -278,14 +303,15 @@ void RunMtOneWay(ZenohShmFixture& fix, benchmark::State& state, bool reliable) {
     KeyExpr key(key_str);
     auto sub = fix.MakeSubscriber(key, /*fifo=*/8);
     auto pub = fix.MakePublisher(key, reliable);
-    if (!WaitUntilLinked(fix, pub, sub, size)) {
+    const uint64_t linked = WaitUntilLinked(fix, pub, sub, size);
+    if (linked == 0) {
         state.SkipWithError("zenoh pub/sub failed to link");
         return;
     }
 
     std::atomic<bool> stop{false};
     std::atomic<int> in_flight{0};
-    std::atomic<uint64_t> seq{0};
+    std::atomic<uint64_t> seq{linked};
     const int max_in_flight = 2;
     std::vector<double> lats;
     lats.reserve(4096);
@@ -321,14 +347,10 @@ void RunMtOneWay(ZenohShmFixture& fix, benchmark::State& state, bool reliable) {
                 break;
             }
             auto& sample = std::get<Sample>(res);
-            if (!sample.get_payload().as_shm().has_value()) {
+            uint64_t send_ns = 0;
+            if (!PayloadMeta(sample, nullptr, &send_ns, nullptr)) {
                 continue;
             }
-            auto shm = sample.get_payload().as_shm();
-            if (shm->get().len() < sizeof(mw_bench::MessageHeader)) {
-                continue;
-            }
-            const uint64_t send_ns = mw_bench::HeaderOf(shm->get().data())->send_ns;
             const double e2e = mw_bench::OneWayLatencySec(send_ns);
             take_stats.Record(e2e, /*was_queued=*/true, /*wait_sec=*/0.0);
             int cur = in_flight.load(std::memory_order_relaxed);

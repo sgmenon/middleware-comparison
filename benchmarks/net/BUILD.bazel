@@ -1,0 +1,45 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+package(default_visibility = ["//visibility:private"])
+
+cc_binary(
+    name = "subspace_net",
+    srcs = [
+        "net_common.h",
+        "subspace_net.cc",
+    ],
+    deps = [
+        "//benchmarks:bench_common",
+        "@abseil-cpp//absl/status",
+        "@coroutines//co",
+        "@subspace//client:subspace_client",
+        "@subspace//common/async",
+        "@subspace//server",
+    ],
+)
+
+cc_binary(
+    name = "zenoh_net",
+    srcs = [
+        "net_common.h",
+        "zenoh_net.cc",
+    ],
+    deps = [
+        "//benchmarks:bench_common",
+        "//benchmarks:zenoh_common",
+        "@zenoh-cpp",
+    ],
+)
+
+cc_binary(
+    name = "cyclone_net",
+    srcs = [
+        "cyclone_net.cc",
+        "net_common.h",
+    ],
+    deps = [
+        "//benchmarks:bench_common",
+        "//benchmarks:bench_idl",
+        "@cyclonedds",
+    ],
+)

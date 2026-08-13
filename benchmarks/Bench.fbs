@@ -1,0 +1,11 @@
+// Equivalent of benchmarks/Bench.idl for non-DDS benches (Zenoh / Subspace).
+// DDS keeps Cyclone idlc; this schema mirrors the same logical sample.
+namespace Bench;
+
+table Sample {
+  seq:ulong;
+  send_ns:ulong;
+  data:[ubyte];
+}
+
+root_type Sample;
