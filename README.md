@@ -12,15 +12,17 @@ We'll walk through the use cases that actually showed up, how we turned those in
 
 ## The split personality of the vehicle
 
-On the HPC side, life is pretty good: shared memory, big payloads, high-level OSes. We want something low-overhead that feels native there.
+On the HPC side, life is pretty good: shared memory, big payloads, high-level OSes. We want something low-overhead that feels native there. The ADAS software nodes tend to receive huge sensor payloads (think radar data and lidar data), and share workloads across multiple SOCs connected over PCIe (the preferred inter-soc transport).
 
 On the MCU side, a lot of boards run classic AUTOSAR, and even the ones that don't often still define their data exchange with ARXML. So the path of least resistance is **SOME/IP** — it's what those teams already speak.
 
-SOME/IP is a middleware in its own right, and honestly not a great fit for most of what we want on the HPC side. So we weren't trying to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP without lighting the CPU on fire when a lidar frame crosses the boundary. And keep topic based Pub/Sub or RPCs with the middleware of choice be the API, and have the SOME/IP routing be a lower level an implementation detail to ADAS users.
+SOME/IP is a middleware in its own right, and honestly not a great fit for most of what we want on the HPC side. So we weren't trying to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP efficiently (most MCU comms tends to use pretty small PDU anway). 
+
+Data oriented design is a cornerstone of our software architecture, so Topic based Pub/Sub and RPCs with the middleware of choice is the preferred form of communication (which doesn't fit seamlessly with the SOME/IP model), so we decided that SOME/IP should effectively be abstracted away as a low level routing implementation detail to the average ADAS user.
 
 ## What we actually needed to do
 
-Without boring you with each specific use cases, here are list of patterns that keep showing up:
+There are many specific use cases, but rather than go into each one, here are list of patterns that keep showing up:
 
 1. **Everyday pub/sub between nodes** — periodic or async, nothing fancy.
 2. **Safety-critical notifications** — here we usually want delivery guarantees, so RPCs are a natural fit.
@@ -45,9 +47,9 @@ We consciously made the choice of not picking a middleware and making a shoe-hor
 
 Everything else — giant QoS menus, in-middleware content filters, "must be peer-to-peer" purity — had to earn a seat. Most of it didn't.
 
-Now, a lot of these kind of comparative studies focus on performance. I would rather not focus so much on performance, but instead focus on the design factors that influence performance. Its almost certain that a DDS Stack from `RTI` will perform differently from `Eclipse Cyclone`, one port may be more efficient than another. However, when we understand the design philosophies we will know how performance is supposed to scale in an efficient implementation.
+Now, a lot of these kind of comparative studies focus on performance. I would rather not fixate so much on raw performance stats, but while we are on the subject of performance I would instead focus on the design factors that influence performance. Its almost certain that a DDS Stack from `RTI` will perform differently from `Eclipse Cyclone`, one port may be more efficient than another. However, when we understand the design philosophies we will know how performance is supposed to scale in an efficient implementation.
 
-Of course, at the end of this document, I will be doing a token comparison on performance, but it will be clear that the zero-copy protocols perform better.
+Of course, at the end of this document, I will be doing a token comparison on performance.
 
 ### The must-haves
 
