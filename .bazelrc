@@ -1,10 +1,13 @@
 # Common build settings
 # Enable Bzlmod for every Bazel command
-common  --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc11
+common --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --platforms=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --extra_toolchains=@gcc_toolchain_x86_64-gcc11//:cc_toolchain
 common --compilation_mode=fastbuild
 common --features=c++20
+
+build:native --host_platform=
+build:native --platforms=
 
 build:opt --compilation_mode=opt
 
