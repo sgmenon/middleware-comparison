@@ -9,6 +9,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -23,7 +26,7 @@ using vsomeip_bench::ReadStamp;
 using vsomeip_bench::Reassembler;
 
 class EventClient {
-public:
+   public:
     explicit EventClient(Options opt) : opt_(std::move(opt)), app_(vsomeip::runtime::get()->create_application()) {}
 
     int Run() {
@@ -31,20 +34,12 @@ public:
             std::fprintf(stderr, "vsomeip init failed\n");
             return 1;
         }
-        const bool tcp = opt_.transport == "tcp";
-        const auto reliability =
-            tcp ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE;
-
         app_->register_state_handler([this](vsomeip::state_type_e st) { OnState(st); });
-        reliability_ = reliability;
         app_->register_availability_handler(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId,
-                                            [this](vsomeip::service_t, vsomeip::instance_t, bool avail) {
-                                                OnAvailability(avail);
-                                            });
+                                            [this](vsomeip::service_t, vsomeip::instance_t, bool avail) { OnAvailability(avail); });
 
-        app_->register_message_handler(
-            vsomeip::ANY_SERVICE, vsomeip::ANY_INSTANCE, vsomeip::ANY_METHOD,
-            [this](const std::shared_ptr<vsomeip::message>& msg) { OnMessage(msg); });
+        app_->register_message_handler(vsomeip::ANY_SERVICE, vsomeip::ANY_INSTANCE, vsomeip::ANY_METHOD,
+                                       [this](const std::shared_ptr<vsomeip::message>& msg) { OnMessage(msg); });
 
         worker_ = std::thread([this] { WaitAndReport(); });
         app_->start();
@@ -54,7 +49,7 @@ public:
         return failed_ ? 1 : 0;
     }
 
-private:
+   private:
     void OnState(vsomeip::state_type_e st) {
         if (st == vsomeip::state_type_e::ST_REGISTERED) {
             app_->request_service(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId);
@@ -76,8 +71,14 @@ private:
         }
         std::set<vsomeip::eventgroup_t> groups{vsomeip_bench::kEventgroupId};
         app_->request_event(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, groups,
-                            vsomeip::event_type_e::ET_EVENT, reliability_);
+                            vsomeip::event_type_e::ET_EVENT, vsomeip::reliability_type_e::RT_UNRELIABLE);
         app_->subscribe(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventgroupId);
+        if (const char* sync_dir = std::getenv("VSOMEIP_BENCH_SYNC_DIR")) {
+            std::filesystem::path ready = std::filesystem::path(sync_dir) / ".bench-sub-ready";
+            std::error_code ec;
+            std::filesystem::create_directories(ready.parent_path(), ec);
+            std::ofstream(ready).put('1');
+        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             available_ = true;
@@ -126,10 +127,6 @@ private:
         if (static_cast<int>(latencies_us_.size()) >= opt_.count) {
             done_ = true;
             cv_.notify_all();
-            app_->unsubscribe(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventgroupId);
-            app_->clear_all_handler();
-            app_->release_service(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId);
-            app_->stop();
         }
     }
 
@@ -138,27 +135,27 @@ private:
             std::unique_lock<std::mutex> lock(mutex_);
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
             while (std::chrono::steady_clock::now() < deadline) {
-                if (cv_.wait_for(lock, std::chrono::seconds(10),
-                                 [this] { return registered_ && available_; })) {
+                if (cv_.wait_for(lock, std::chrono::seconds(10), [this] { return registered_ && available_; })) {
                     break;
                 }
-                std::fprintf(stderr, "waiting for vsomeip: registered=%d available=%d (SD / routing)\n",
-                             registered_ ? 1 : 0, available_ ? 1 : 0);
+                std::fprintf(stderr, "waiting for vsomeip: registered=%d available=%d (SD / routing)\n", registered_ ? 1 : 0,
+                             available_ ? 1 : 0);
             }
             if (!registered_ || !available_) {
-                std::fprintf(stderr,
-                             "timeout waiting for vsomeip registration/service (routing manager up?)\n");
+                std::fprintf(stderr, "timeout waiting for vsomeip registration/service (routing manager up?)\n");
                 failed_ = true;
-                app_->stop();
-                return;
+                vsomeip_bench::TouchBenchSubDone();
+                std::quick_exit(1);
             }
             cv_.wait_for(lock, std::chrono::seconds(120), [this] { return done_; });
         }
         PrintCsv(opt_, latencies_us_, gap_count_);
+        vsomeip_bench::TouchBenchSubDone();
+        // vsomeip shutdown can block indefinitely; benchmark is done.
+        std::quick_exit(failed_ ? 1 : 0);
     }
 
     Options opt_;
-    vsomeip::reliability_type_e reliability_{vsomeip::reliability_type_e::RT_RELIABLE};
     std::shared_ptr<vsomeip::application> app_;
     Reassembler reassembler_;
     std::mutex mutex_;

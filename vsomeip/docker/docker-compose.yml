@@ -24,12 +24,15 @@ services:
         ipv4_address: 172.29.0.3
     volumes:
       - ${REPO_ROOT:-../..}:/workspace
-      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:/root/.cache
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:${CONTAINER_HOME:-/home/bench}/.cache
     environment:
-      BAZEL_OUTPUT_USER_ROOT: /root/.cache/bazel-output
+      HOME: ${CONTAINER_HOME:-/home/bench}
+      HOST_UID: ${HOST_UID}
+      HOST_GID: ${HOST_GID}
+      BENCH_USER: ${BENCH_USER:-bench}
+      BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
       ROLE: service
       STACK: ${STACK:-sgmenon}
-      TRANSPORT: ${TRANSPORT:-tcp}
       SIZE: ${SIZE:-4096}
       COUNT: ${COUNT:-1000}
       RATE_HZ: ${RATE_HZ:-1000}
@@ -38,7 +41,7 @@ services:
       SERVICE_IP: 172.29.0.3
       CLIENT_IP: 172.29.0.2
     healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/vsomeip-service-ready"]
+      test: [CMD, test, -f, /tmp/vsomeip-service-ready]
       interval: 1s
       timeout: 2s
       retries: 180
@@ -58,15 +61,18 @@ services:
         ipv4_address: 172.29.0.2
     volumes:
       - ${REPO_ROOT:-../..}:/workspace
-      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:/root/.cache
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:${CONTAINER_HOME:-/home/bench}/.cache
     depends_on:
       pub:
         condition: service_healthy
     environment:
-      BAZEL_OUTPUT_USER_ROOT: /root/.cache/bazel-output
+      HOME: ${CONTAINER_HOME:-/home/bench}
+      HOST_UID: ${HOST_UID}
+      HOST_GID: ${HOST_GID}
+      BENCH_USER: ${BENCH_USER:-bench}
+      BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
       ROLE: client
       STACK: ${STACK:-sgmenon}
-      TRANSPORT: ${TRANSPORT:-tcp}
       SIZE: ${SIZE:-4096}
       COUNT: ${COUNT:-1000}
       RATE_HZ: ${RATE_HZ:-1000}
@@ -74,4 +80,3 @@ services:
       MAX_DATAGRAM: ${MAX_DATAGRAM:-1400}
       SERVICE_IP: 172.29.0.3
       CLIENT_IP: 172.29.0.2
-

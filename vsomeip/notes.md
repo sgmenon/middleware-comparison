@@ -8,10 +8,10 @@ them into the main middleware comparison.
 
 `MODULE.bazel` loads `third_party/vsomeip/extension.bzl`, which registers:
 
-| Repo | Source | Role |
-|------|--------|------|
-| `@vsomeip_sgmenon` | [sgmenon/vsomeip](https://github.com/sgmenon/vsomeip) @ `598f3a79…` (main) | **Improved** GM-style stack (no external RM) |
-| `@vsomeip_covesa` | Same fork @ `e235a303…` | **Baseline** COVESA-style snapshot w/ Bazel BUILD files |
+| Repo               | Source                                                                     | Role                                                    |
+| ------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `@vsomeip_sgmenon` | [sgmenon/vsomeip](https://github.com/sgmenon/vsomeip) @ `598f3a79…` (main) | **Improved** GM-style stack (no external RM)            |
+| `@vsomeip_covesa`  | Same fork @ `e235a303…`                                                    | **Baseline** COVESA-style snapshot w/ Bazel BUILD files |
 
 The covesa pin is fetched from the fork because GitHub returns 404 for that commit on
 `COVESA/vsomeip` archives; the SHA is an ancestor of main in the fork.
@@ -36,31 +36,41 @@ EOF
 ## Workload
 
 - One service / instance / event group / event (see `bench/constants.h`).
-- **TCP** (`RT_RELIABLE`): single notification per sample (nominal case).
-- **UDP** (`RT_UNRELIABLE`): payloads larger than `--max-datagram` are split in **user
-  space** (`bench/fragment.h`) into multiple notifications and reassembled on the subscriber.
-  **No SOME/IP-TP.**
-  
+- **UDP only** (`RT_UNRELIABLE`): service config exposes a single **unreliable** port (no TCP
+  `reliable` block). Payloads larger than `--max-datagram` are split in **user space**
+  (`bench/fragment.h`) and reassembled on the subscriber. **No SOME/IP-TP.**
+
+**What we measure:** latency for one **logical frame** (e.g. lidar scan blob)—timestamp on the full
+`size`-byte payload before fragmentation, latency recorded only after the subscriber reassembles the
+same `size`. The table/chart summarize a **distribution** (mean, p50, p99 over many frames).
+
+**Size grid** matches `notes/benchmarks.md` ReliablePingPong: 64 B, 1 KiB, 16 KiB, 64 KiB, 256 KiB,
+1 MiB, 4 MiB (`docker/size_ladder.sh`). **`rate_hz` is a fixed pace** so frames are not back-to-back;
+it is not swept here (that would be a separate CPU/load study).
+
 ### Process layout under test (Docker)
 
-| `STACK` | Library | Pub container | Sub container |
-|---------|---------|---------------|---------------|
-| `covesa` | Baseline pin | `routingmanagerd` + `event_service_covesa` | `routingmanagerd` + `event_client_covesa` |
-| `sgmenon` | Fork main | `event_service_sgmenon` only (`"routing": "bench_service"`) | `event_client_sgmenon` only (`"routing": "bench_client"`) |
+| `STACK`   | Library      | Pub container                                               | Sub container                                             |
+| --------- | ------------ | ----------------------------------------------------------- | --------------------------------------------------------- |
+| `covesa`  | Baseline pin | `routingmanagerd` + `event_service_covesa`                  | `routingmanagerd` + `event_client_covesa`                 |
+| `sgmenon` | Fork main    | `event_service_sgmenon` only (`"routing": "bench_service"`) | `event_client_sgmenon` only (`"routing": "bench_client"`) |
 
-Config: one `vsomeip/config/vsomeip.json.in` for both containers; `entrypoint.sh` sets
-`@UNICAST@` and `@ROUTING@` only (`routingmanagerd` on covesa, else `bench_service` /
-`bench_client`). Baseline also uses `routingmanagerd.json.in` for the sidecar RM process.
+Config: `vsomeip/config/vsomeip.json.in` (pub) or `vsomeip_client.json.in` (sub) → `bench.json` (`@UNICAST@`, `@ROUTING@`).
+Pub keeps the UDP `services` block; sub drops `services` and adds a `clients` port range. **covesa**
+`routingmanagerd` uses the same `bench.json` as the bench binary (`VSOMEIP_APPLICATION_NAME` selects
+the process).
 
 CSV columns (subscriber prints one line):
 
-`stack,transport,size,rate_hz,n,mean_us,p50_us,p99_us,gap_count`
+`stack,size,rate_hz,n,mean_us,p50_us,p99_us,gap_count` (UDP event notify only)
 
 ## Docker (Bazel inside the container)
 
-Two containers on a fixed `/24` (pub @ `172.29.0.3`, sub @ `172.29.0.2`); entrypoint runs
-`multicast_setup.sh` then `bazel_entrypoint.sh`. Pub keeps the `services` block; sub config drops
-it so SD learns the remote offer (same split as upstream `event_test` docker configs).
+Two containers on a fixed `/24` (pub @ `172.29.0.3`, sub @ `172.29.0.2`). Containers start as
+root with **`cap_add: NET_ADMIN`** so `multicast_setup.sh` can configure the veth; entrypoint then
+**`setpriv`** to **`HOST_UID`/`HOST_GID`** (from `run.sh`) for Bazel and the bench binaries. Compose
+`user:` plus `cap_add` alone does not grant effective caps to an unprivileged process.
+Pub keeps the `services` block; sub drops it and adds `clients` for UDP subscriber ports.
 
 ### SD, multicast routes, and Docker
 
@@ -85,11 +95,14 @@ behave the same on your kernel.
 
 ```bash
 # Baseline: dual routingmanagerd (COVESA-style)
-STACK=covesa TRANSPORT=tcp SIZE=4096 RATE_HZ=1000 COUNT=1000 vsomeip/docker/run.sh
+STACK=covesa SIZE=4096 RATE_HZ=1000 COUNT=1000 vsomeip/docker/run.sh
 
 # Improved: no routingmanagerd (GM-style per-app routing on the fork)
-STACK=sgmenon TRANSPORT=udp SIZE=65536 RATE_HZ=500 COUNT=2000 vsomeip/docker/run.sh
+STACK=sgmenon SIZE=65536 RATE_HZ=500 COUNT=2000 vsomeip/docker/run.sh
 
-# Rate/size grid → bench_results/vsomeip/ (set STACK=covesa|sgmenon)
-STACK=sgmenon TRANSPORT=udp vsomeip/docker/sweep.sh
+# Size ladder → bench_results/vsomeip/ (set STACK=covesa|sgmenon)
+STACK=sgmenon vsomeip/docker/sweep.sh
+
+# Snapshot markdown (both stacks, size ladder)
+vsomeip/docker/run_snapshot.sh
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Small grid for vsomeip/results-snapshot.md (not a full rate sweep).
+# Frame-latency grid for vsomeip/results-snapshot.md (payload size ladder, fixed pace).
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,32 +7,29 @@ ROOT="$(cd "${DIR}/../.." && pwd)"
 OUT="${ROOT}/vsomeip/results-snapshot.md"
 CSV_TMP="$(mktemp)"
 
-COUNT="${COUNT:-500}"
+# shellcheck source=size_ladder.sh
+source "${DIR}/size_ladder.sh"
+
+COUNT="${COUNT:-200}"
 WARMUP="${WARMUP:-50}"
 
-echo "stack,transport,size,rate_hz,n,mean_us,p50_us,p99_us,gap_count" > "${CSV_TMP}"
+echo "stack,size,rate_hz,n,mean_us,p50_us,p99_us,gap_count" > "${CSV_TMP}"
 
-runs=(
-  "covesa tcp 4096 500"
-  "covesa tcp 4096 1000"
-  "covesa udp 4096 500"
-  "covesa udp 65536 500"
-  "sgmenon tcp 4096 500"
-  "sgmenon tcp 4096 1000"
-  "sgmenon udp 4096 500"
-  "sgmenon udp 65536 500"
-)
-
-for spec in "${runs[@]}"; do
-  read -r STACK TRANSPORT SIZE RATE_HZ <<< "${spec}"
-  echo "== ${spec} ==" >&2
-  if STACK="${STACK}" TRANSPORT="${TRANSPORT}" SIZE="${SIZE}" RATE_HZ="${RATE_HZ}" \
-    COUNT="${COUNT}" WARMUP="${WARMUP}" "${DIR}/run.sh" > /tmp/mw_vsomeip_snap.log 2>&1; then
-    grep -E '^(covesa|sgmenon),' /tmp/mw_vsomeip_snap.log >> "${CSV_TMP}" || true
-  else
-    echo "${STACK},${TRANSPORT},${SIZE},${RATE_HZ},0,NA,NA,NA,NA" >> "${CSV_TMP}"
-    echo "failed: ${spec} (see /tmp/mw_vsomeip_snap.log)" >&2
-  fi
+for SIZE in "${VSOMEIP_FRAME_SIZES[@]}"; do
+  RATE_HZ="$(vsomeip_rate_for_size "${SIZE}")"
+  for STACK in covesa sgmenon; do
+    echo "== ${STACK} udp frame=${SIZE} rate=${RATE_HZ} ==" >&2
+    if STACK="${STACK}" SIZE="${SIZE}" RATE_HZ="${RATE_HZ}" \
+      COUNT="${COUNT}" WARMUP="${WARMUP}" "${DIR}/run.sh" > /tmp/mw_vsomeip_snap.log 2>&1; then
+      if ! grep -aE '^(covesa|sgmenon),' /tmp/mw_vsomeip_snap.log >> "${CSV_TMP}"; then
+        echo "${STACK},${SIZE},${RATE_HZ},0,NA,NA,NA,NA" >> "${CSV_TMP}"
+        echo "no CSV line: ${STACK} ${SIZE} (see /tmp/mw_vsomeip_snap.log)" >&2
+      fi
+    else
+      echo "${STACK},${SIZE},${RATE_HZ},0,NA,NA,NA,NA" >> "${CSV_TMP}"
+      echo "failed: ${STACK} ${SIZE} (see /tmp/mw_vsomeip_snap.log)" >&2
+    fi
+  done
 done
 
 git_sha="$(git -C "${ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"

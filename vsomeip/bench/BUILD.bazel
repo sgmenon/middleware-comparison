@@ -23,6 +23,7 @@ _VSOMEIP_SGMENON_DEPS = [
     "@vsomeip_sgmenon//:vsomeip-sd",
 ]
 
+# buildifier: disable=no-effect
 [
     cc_binary(
         name = "event_client_{repo}".format(repo = repo),
@@ -31,8 +32,22 @@ _VSOMEIP_SGMENON_DEPS = [
         deps = [":bench_common_lib"] + deps,
     )
     for repo, deps, data in [
-        ("covesa", _VSOMEIP_COVESA_DEPS, ["@vsomeip_covesa//:vsomeip3-cfg", "@vsomeip_covesa//:vsomeip3-sd"]),
-        ("sgmenon", _VSOMEIP_SGMENON_DEPS, ["@vsomeip_sgmenon//:vsomeip3-cfg", "@vsomeip_sgmenon//:vsomeip3-sd"]),
+        (
+            "covesa",
+            _VSOMEIP_COVESA_DEPS,
+            [
+                "@vsomeip_covesa//:vsomeip3-cfg",
+                "@vsomeip_covesa//:vsomeip3-sd",
+            ],
+        ),
+        (
+            "sgmenon",
+            _VSOMEIP_SGMENON_DEPS,
+            [
+                "@vsomeip_sgmenon//:vsomeip3-cfg",
+                "@vsomeip_sgmenon//:vsomeip3-sd",
+            ],
+        ),
     ]
 ] + [
     cc_binary(
@@ -42,7 +57,21 @@ _VSOMEIP_SGMENON_DEPS = [
         deps = [":bench_common_lib"] + deps,
     )
     for repo, deps, data in [
-        ("covesa", _VSOMEIP_COVESA_DEPS, ["@vsomeip_covesa//:vsomeip3-cfg", "@vsomeip_covesa//:vsomeip3-sd"]),
-        ("sgmenon", _VSOMEIP_SGMENON_DEPS, ["@vsomeip_sgmenon//:vsomeip3-cfg", "@vsomeip_sgmenon//:vsomeip3-sd"]),
+        (
+            "covesa",
+            _VSOMEIP_COVESA_DEPS,
+            [
+                "@vsomeip_covesa//:vsomeip3-cfg",
+                "@vsomeip_covesa//:vsomeip3-sd",
+            ],
+        ),
+        (
+            "sgmenon",
+            _VSOMEIP_SGMENON_DEPS,
+            [
+                "@vsomeip_sgmenon//:vsomeip3-cfg",
+                "@vsomeip_sgmenon//:vsomeip3-sd",
+            ],
+        ),
     ]
 ]

@@ -14,13 +14,11 @@ namespace vsomeip_bench {
 
 inline std::uint64_t NowNs() {
     return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-            .count());
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 struct Options {
     std::string stack;
-    std::string transport = "tcp";
     std::size_t size = 4096;
     int count = 1000;
     int warmup = 50;
@@ -41,9 +39,7 @@ inline bool ParseOptions(int argc, char** argv, Options* out) {
             }
             return nullptr;
         };
-        if (const char* v = take("--transport=")) {
-            out->transport = v;
-        } else if (const char* v = take("--size=")) {
+        if (const char* v = take("--size=")) {
             out->size = static_cast<std::size_t>(std::strtoull(v, nullptr, 10));
         } else if (const char* v = take("--count=")) {
             out->count = std::atoi(v);
@@ -57,7 +53,7 @@ inline bool ParseOptions(int argc, char** argv, Options* out) {
             out->stack = v;
         } else if (a == "--help" || a == "-h") {
             std::fprintf(stderr,
-                         "Usage: %s [--transport=tcp|udp] [--size=N] [--count=N] [--warmup=N] "
+                         "Usage: %s [--size=N] [--count=N] [--warmup=N] "
                          "[--rate-hz=F] [--max-datagram=N] [--stack=NAME]\n",
                          argv[0]);
             return false;
@@ -65,10 +61,6 @@ inline bool ParseOptions(int argc, char** argv, Options* out) {
             std::fprintf(stderr, "unknown arg: %s\n", argv[i]);
             return false;
         }
-    }
-    if (out->transport != "tcp" && out->transport != "udp") {
-        std::fprintf(stderr, "--transport must be tcp or udp\n");
-        return false;
     }
     if (out->size == 0 || out->count <= 0 || out->rate_hz <= 0) {
         std::fprintf(stderr, "invalid size/count/rate-hz\n");
@@ -101,10 +93,22 @@ inline double PercentileUs(std::vector<double> us, double p) {
 }
 
 inline void PrintCsv(const Options& opt, const std::vector<double>& latency_us, std::uint64_t gap_count) {
-    std::printf("%s,%s,%zu,%.1f,%zu,%.3f,%.3f,%.3f,%llu\n", opt.stack.c_str(), opt.transport.c_str(), opt.size,
-                opt.rate_hz, latency_us.size(), MeanUs(latency_us), PercentileUs(latency_us, 0.50),
-                PercentileUs(latency_us, 0.99), static_cast<unsigned long long>(gap_count));
+    std::printf("%s,%zu,%.1f,%zu,%.3f,%.3f,%.3f,%llu\n", opt.stack.c_str(), opt.size, opt.rate_hz, latency_us.size(), MeanUs(latency_us),
+                PercentileUs(latency_us, 0.50), PercentileUs(latency_us, 0.99), static_cast<unsigned long long>(gap_count));
     std::fflush(stdout);
+}
+
+/** Lets pub container exit while vsomeip shutdown may still block in app_->stop(). */
+inline void TouchBenchSubDone() {
+    const char* sync_dir = std::getenv("VSOMEIP_BENCH_SYNC_DIR");
+    if (!sync_dir) {
+        return;
+    }
+    std::string path = std::string(sync_dir) + "/.bench-sub-done";
+    if (FILE* f = std::fopen(path.c_str(), "w")) {
+        std::fputc('1', f);
+        std::fclose(f);
+    }
 }
 
 inline void StampPayload(std::uint8_t* data, std::size_t length, std::uint64_t send_ns, std::uint32_t seq) {

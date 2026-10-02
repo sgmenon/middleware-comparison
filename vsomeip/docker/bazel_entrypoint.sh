@@ -3,13 +3,19 @@
 # bench/R routingmanagerd processes — `bazel run` keeps the output-base lock until the child exits.
 set -euo pipefail
 
-if [[ "${VSOMEIP_DOCKER_NET_SETUP:-1}" != "0" ]]; then
-  /usr/local/bin/multicast_setup.sh
+# cap_add NET_ADMIN is effective for root only; drop to caller UID before Bazel (see run.sh).
+if [[ "$(id -u)" -eq 0 && -n "${HOST_UID:-}" && -n "${HOST_GID:-}" && "${VSOMEIP_DROPPED:-}" != 1 ]]; then
+  if [[ "${VSOMEIP_DOCKER_NET_SETUP:-1}" != "0" ]]; then
+    /usr/local/bin/multicast_setup.sh
+  fi
+  export VSOMEIP_DROPPED=1
+  exec setpriv --reuid="${HOST_UID}" --regid="${HOST_GID}" --clear-groups \
+    env USER="${BENCH_USER:-bench}" LOGNAME="${BENCH_USER:-bench}" HOME="${HOME:-/home/bench}" \
+    /usr/local/bin/bazel_entrypoint.sh
 fi
 
 ROLE="${ROLE:?ROLE must be service (pub) or client (sub)}"
 STACK="${STACK:?STACK must be covesa (baseline) or sgmenon (improved)}"
-TRANSPORT="${TRANSPORT:-tcp}"
 SIZE="${SIZE:-4096}"
 COUNT="${COUNT:-1000}"
 RATE_HZ="${RATE_HZ:-1000}"
@@ -20,7 +26,8 @@ CLIENT_IP="${CLIENT_IP:-172.29.0.2}"
 SERVICE_IP="${SERVICE_IP:-172.29.0.3}"
 
 WS="${WORKSPACE:-/workspace}"
-export BAZEL_OUTPUT_USER_ROOT="${BAZEL_OUTPUT_USER_ROOT:-/root/.cache/bazel-output}"
+export HOME="${HOME:-/home/bench}"
+export BAZEL_OUTPUT_USER_ROOT="${BAZEL_OUTPUT_USER_ROOT:-${HOME}/.cache/bazel-output}"
 TPL="${WS}/vsomeip/config"
 CFG_DIR="/tmp/vsomeip-config"
 mkdir -p "${CFG_DIR}"
@@ -52,20 +59,12 @@ else
   RM_LABEL=""
 fi
 
-sed -e "s/@UNICAST@/${UNICAST}/g" -e "s/@ROUTING@/${ROUTING}/g" \
-  "${TPL}/vsomeip.json.in" > "${CFG_DIR}/bench.json"
+CFG_TPL="${TPL}/vsomeip.json.in"
 if [[ "${ROLE}" == "client" ]]; then
-  # Subscriber discovers remote offers via SD (see sgmenon event_test docker configs).
-  python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path("/tmp/vsomeip-config/bench.json")
-cfg = json.loads(path.read_text())
-cfg.pop("services", None)
-path.write_text(json.dumps(cfg, indent=2) + "\n")
-PY
+  CFG_TPL="${TPL}/vsomeip_client.json.in"
 fi
+sed -e "s/@UNICAST@/${UNICAST}/g" -e "s/@ROUTING@/${ROUTING}/g" \
+  "${CFG_TPL}" > "${CFG_DIR}/bench.json"
 if [[ -n "${VSOMEIP_LOG_LEVEL:-}" ]]; then
   sed -i "s/\"level\": \"warning\"/\"level\": \"${VSOMEIP_LOG_LEVEL}\"/" "${CFG_DIR}/bench.json"
 fi
@@ -90,6 +89,19 @@ BinForLabel() {
   printf '%s' "${bin}"
 }
 
+CovesaLibDir() {
+  local so
+  so=$(cd "${WS}" && "${BAZEL[@]}" cquery '@vsomeip_covesa//:vsomeip3-sd' --config=opt --config=docker --output=files 2>/dev/null | tail -1)
+  if [[ -z "${so}" ]]; then
+    echo "bazel cquery failed for @vsomeip_covesa//:vsomeip3-sd" >&2
+    exit 1
+  fi
+  if [[ "${so}" != /* ]]; then
+    so="${WS}/${so}"
+  fi
+  dirname "${so}"
+}
+
 RM_PID=""
 cleanup() {
   if [[ -n "${RM_PID}" ]]; then
@@ -102,10 +114,10 @@ trap cleanup EXIT
 if [[ "${STACK}" == "covesa" ]]; then
   echo "== bazel build routingmanagerd (baseline, local RM on pub and sub) ==" >&2
   BazelBuild "${RM_LABEL}"
-  sed -e "s/@UNICAST@/${HOST_IP}/g" "${TPL}/routingmanagerd.json.in" > "${CFG_DIR}/routingmanagerd.json"
-  export VSOMEIP_CONFIGURATION="${CFG_DIR}/routingmanagerd.json"
+  export VSOMEIP_CONFIGURATION="${CFG_DIR}/bench.json"
   export VSOMEIP_APPLICATION_NAME="routingmanagerd"
   rm_bin="$(BinForLabel "${RM_LABEL}")"
+  export LD_LIBRARY_PATH="$(CovesaLibDir)${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
   echo "== exec routingmanagerd (unicast=${HOST_IP}) ==" >&2
   "${rm_bin}" &
   RM_PID=$!
@@ -130,7 +142,6 @@ fi
 
 bench_args=(
   --stack="${STACK}"
-  --transport="${TRANSPORT}"
   --size="${SIZE}"
   --count="${COUNT}"
   --warmup="${WARMUP}"
@@ -139,9 +150,12 @@ bench_args=(
 )
 
 export VSOMEIP_CONFIGURATION="${CFG_DIR}/bench.json"
+export VSOMEIP_BENCH_SYNC_DIR="${WS}/vsomeip/docker"
+BENCH_DONE="${WS}/vsomeip/docker/.bench-sub-done"
+BENCH_SUB_READY="${VSOMEIP_BENCH_SYNC_DIR}/.bench-sub-ready"
 if [[ "${ROLE}" == "service" ]]; then
   export VSOMEIP_APPLICATION_NAME="bench_service"
-  rm -f /tmp/vsomeip-service-ready
+  rm -f /tmp/vsomeip-service-ready "${BENCH_DONE}" "${BENCH_SUB_READY}"
 else
   export VSOMEIP_APPLICATION_NAME="bench_client"
 fi
@@ -150,4 +164,14 @@ echo "== bazel build ${BENCH} ==" >&2
 BazelBuild "${BENCH}"
 bench_bin="$(BinForLabel "${BENCH}")"
 echo "== exec ${BENCH} ${bench_args[*]} ==" >&2
-exec "${bench_bin}" "${bench_args[@]}"
+if [[ "${ROLE}" == "service" ]]; then
+  # Subscriber may still be starting (Bazel build) or collecting samples; do not exit and tear down compose.
+  "${bench_bin}" "${bench_args[@]}"
+  echo "service bench finished; waiting for subscriber (marker ${BENCH_DONE})" >&2
+  for _ in $(seq 1 240); do
+    [[ -f "${BENCH_DONE}" ]] && break
+    sleep 1
+  done
+else
+  exec "${bench_bin}" "${bench_args[@]}"
+fi

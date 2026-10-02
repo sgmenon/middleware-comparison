@@ -16,7 +16,7 @@ On the HPC side, life is pretty good: shared memory, big payloads, high-level OS
 
 On the MCU side, a lot of boards run classic AUTOSAR, and even the ones that don't often still define their data exchange with ARXML. So the path of least resistance is **SOME/IP** — it's what those teams already speak.
 
-SOME/IP is a middleware in its own right, and honestly not a great fit for most of what we want on the HPC side. So we weren't trying to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP efficiently (most MCU comms tends to use pretty small PDU anway). 
+SOME/IP is a middleware in its own right, and honestly not a great fit for most of what we want on the HPC side. So we weren't trying to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP efficiently (most MCU comms tends to use pretty small PDU anway).
 
 Data oriented design is a cornerstone of our software architecture, so Topic based Pub/Sub and RPCs with the middleware of choice is the preferred form of communication (which doesn't fit seamlessly with the SOME/IP model), so we decided that SOME/IP should effectively be abstracted away as a low level routing implementation detail to the average ADAS user.
 

@@ -27,8 +27,8 @@ inline std::size_t MaxFragmentPayload(std::size_t max_datagram) {
     return max_datagram - sizeof(FragHeader);
 }
 
-inline std::vector<std::vector<std::uint8_t>> FragmentPayload(std::uint32_t message_id, const std::uint8_t* data,
-                                                              std::size_t length, std::size_t max_datagram) {
+inline std::vector<std::vector<std::uint8_t>> FragmentPayload(std::uint32_t message_id, const std::uint8_t* data, std::size_t length,
+                                                              std::size_t max_datagram) {
     const std::size_t chunk = MaxFragmentPayload(max_datagram);
     if (chunk == 0 || length <= chunk) {
         std::vector<std::uint8_t> single(length);
@@ -37,8 +37,7 @@ inline std::vector<std::vector<std::uint8_t>> FragmentPayload(std::uint32_t mess
         }
         return {std::move(single)};
     }
-    const std::uint16_t count =
-        static_cast<std::uint16_t>((length + chunk - 1) / chunk);
+    const std::uint16_t count = static_cast<std::uint16_t>((length + chunk - 1) / chunk);
     std::vector<std::vector<std::uint8_t>> out;
     out.reserve(count);
     for (std::uint16_t i = 0; i < count; ++i) {
@@ -58,7 +57,7 @@ inline std::vector<std::vector<std::uint8_t>> FragmentPayload(std::uint32_t mess
 }
 
 class Reassembler {
-public:
+   public:
     // Returns complete logical payload when all fragments arrived; empty optional otherwise.
     std::optional<std::vector<std::uint8_t>> ingest(const std::uint8_t* data, std::size_t length) {
         if (length < sizeof(FragHeader)) {
@@ -106,7 +105,7 @@ public:
         return assembled;
     }
 
-private:
+   private:
     struct Partial {
         std::uint32_t total = 0;
         std::uint16_t count = 0;

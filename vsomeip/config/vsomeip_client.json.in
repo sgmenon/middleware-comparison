@@ -7,15 +7,11 @@
     { "name": "bench_client", "id": "0x3489" },
     { "name": "routingmanagerd", "id": "0x4000" }
   ],
-  "services": [
+  "clients": [
     {
       "service": "0xbeef",
       "instance": "0x0001",
-      "unreliable": "30510",
-      "events": [{ "event": "0x8001" }],
-      "eventgroups": [
-        { "eventgroup": "0x0001", "events": ["0x8001"] }
-      ]
+      "unreliable": [40000, 49999]
     }
   ],
   "routing": "@ROUTING@",

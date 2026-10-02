@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iproute2 \
         libstdc++6 \
         python3 \
+        util-linux \
         unzip \
         zip \
     && rm -rf /var/lib/apt/lists/*
@@ -17,8 +18,7 @@ RUN curl -fsSL "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZE
         -o /usr/local/bin/bazel \
     && chmod +x /usr/local/bin/bazel
 
-# Shared with host via compose mount: ${HOME}/.cache -> /root/.cache
-ENV BAZEL_OUTPUT_USER_ROOT=/root/.cache/bazel-output
+# Compose runs as host UID/GID; cache mounted at $HOME/.cache (see docker-compose.yml).
 WORKDIR /workspace
 
 COPY multicast_setup.sh bazel_entrypoint.sh /usr/local/bin/
