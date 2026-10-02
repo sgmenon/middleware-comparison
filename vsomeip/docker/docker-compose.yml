@@ -1,0 +1,77 @@
+# Two-container bridge for vsomeip event notify benches (see vsomeip/docker/run.sh).
+# Bazel builds and runs inside each container; repo is bind-mounted at /workspace.
+name: mw_vsomeip
+
+networks:
+  vsomeip_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+services:
+  pub:
+    profiles: [vsomeip]
+    image: mw-vsomeip-bench:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_vsomeip_pub
+    hostname: pub
+    cap_add: [NET_ADMIN]
+    networks:
+      vsomeip_net:
+        ipv4_address: 172.29.0.3
+    volumes:
+      - ${REPO_ROOT:-../..}:/workspace
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:/root/.cache
+    environment:
+      BAZEL_OUTPUT_USER_ROOT: /root/.cache/bazel-output
+      ROLE: service
+      STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-tcp}
+      SIZE: ${SIZE:-4096}
+      COUNT: ${COUNT:-1000}
+      RATE_HZ: ${RATE_HZ:-1000}
+      WARMUP: ${WARMUP:-50}
+      MAX_DATAGRAM: ${MAX_DATAGRAM:-1400}
+      SERVICE_IP: 172.29.0.3
+      CLIENT_IP: 172.29.0.2
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/vsomeip-service-ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 180
+      start_period: 120s
+
+  sub:
+    profiles: [vsomeip]
+    image: mw-vsomeip-bench:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_vsomeip_sub
+    hostname: sub
+    cap_add: [NET_ADMIN]
+    networks:
+      vsomeip_net:
+        ipv4_address: 172.29.0.2
+    volumes:
+      - ${REPO_ROOT:-../..}:/workspace
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:/root/.cache
+    depends_on:
+      pub:
+        condition: service_healthy
+    environment:
+      BAZEL_OUTPUT_USER_ROOT: /root/.cache/bazel-output
+      ROLE: client
+      STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-tcp}
+      SIZE: ${SIZE:-4096}
+      COUNT: ${COUNT:-1000}
+      RATE_HZ: ${RATE_HZ:-1000}
+      WARMUP: ${WARMUP:-50}
+      MAX_DATAGRAM: ${MAX_DATAGRAM:-1400}
+      SERVICE_IP: 172.29.0.3
+      CLIENT_IP: 172.29.0.2
+

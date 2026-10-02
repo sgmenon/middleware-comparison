@@ -1,0 +1,47 @@
+# vsomeip benchmark snapshot
+
+Generated **{{ date_utc }}** from `mw-benchmark` @ `{{ git_sha }}`.
+
+Harness: `vsomeip/docker/run.sh` (2-container bridge, pub `172.29.0.3`, sub `172.29.0.2`).
+Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing host.
+Samples per run: count={{ count }}, warmup={{ warmup }}. Latency = receive time − send stamp in payload (µs).
+
+| stack | transport | size (B) | rate (Hz) | n | mean (µs) | p50 (µs) | p99 (µs) | gaps |
+|-------|-----------|----------|-----------|---|-----------|----------|----------|------|
+{% for r in rows -%}
+| {{ r.stack }} | {{ r.transport }} | {{ r.size }} | {{ r.rate_hz }} | {{ r.n }} | {{ r.mean_us }} | {{ r.p50_us }} | {{ r.p99_us }} | {{ r.gap_count }} |
+{% endfor %}
+
+## Mean latency (µs)
+
+One-way latency (receive − send stamp in payload). Bars omit failed runs (NA).
+
+```mermaid
+xychart-beta
+    title "Mean latency by configuration"
+{% if chart_labels %}
+    x-axis ["{{ chart_labels | join('", "') }}"]
+    y-axis "µs" 0 --> {{ chart_y_max }}
+    bar [{{ chart_bar_values | join(', ') }}]
+{% else %}
+    x-axis ["no data"]
+    y-axis "µs" 0 --> 1
+    bar [0]
+{% endif %}
+```
+
+## covesa vs sgmenon (4096 B @ 500 Hz)
+
+```mermaid
+xychart-beta
+    title "4096 B, 500 Hz — mean latency"
+    x-axis ["tcp covesa", "tcp sgmenon", "udp covesa", "udp sgmenon"]
+    y-axis "µs" 0 --> {{ compare_y_max }}
+    bar [{{ compare_bars.covesa_tcp }}, {{ compare_bars.sgmenon_tcp }}, {{ compare_bars.covesa_udp }}, {{ compare_bars.sgmenon_udp }}]
+```
+
+Raw CSV:
+
+```csv
+{{ csv_raw }}
+```

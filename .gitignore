@@ -1,6 +1,9 @@
 bench_results/
 docker/net/staging/
+vsomeip/docker/staging/
+.cache/bazel-output/
 docs/figures/export/
 bazel-*
 user.bazelrc
 .notes/
+*.pdf

@@ -1,0 +1,15 @@
+{
+  "unicast": "@UNICAST@",
+  "netmask": "255.255.255.0",
+  "logging": { "level": "warning", "console": "true" },
+  "applications": [
+    { "name": "routingmanagerd", "id": "0x4000" }
+  ],
+  "routing": "routingmanagerd",
+  "service-discovery": {
+    "enable": "true",
+    "multicast": "224.0.50.1",
+    "port": "30490",
+    "protocol": "udp"
+  }
+}

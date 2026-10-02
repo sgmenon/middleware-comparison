@@ -1,0 +1,48 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "bench_common_lib",
+    hdrs = [
+        "bench_common.h",
+        "constants.h",
+        "fragment.h",
+    ],
+    includes = ["."],
+)
+
+_VSOMEIP_COVESA_DEPS = [
+    "@vsomeip_covesa//:vsomeip",
+    "@vsomeip_covesa//:vsomeip-sd",
+    "@vsomeip_covesa//:vsomeip-cfg",
+]
+
+_VSOMEIP_SGMENON_DEPS = [
+    "@vsomeip_sgmenon//:vsomeip",
+    "@vsomeip_sgmenon//:vsomeip-sd",
+]
+
+[
+    cc_binary(
+        name = "event_client_{repo}".format(repo = repo),
+        srcs = ["event_client.cc"],
+        data = data,
+        deps = [":bench_common_lib"] + deps,
+    )
+    for repo, deps, data in [
+        ("covesa", _VSOMEIP_COVESA_DEPS, ["@vsomeip_covesa//:vsomeip3-cfg", "@vsomeip_covesa//:vsomeip3-sd"]),
+        ("sgmenon", _VSOMEIP_SGMENON_DEPS, ["@vsomeip_sgmenon//:vsomeip3-cfg", "@vsomeip_sgmenon//:vsomeip3-sd"]),
+    ]
+] + [
+    cc_binary(
+        name = "event_service_{repo}".format(repo = repo),
+        srcs = ["event_service.cc"],
+        data = data,
+        deps = [":bench_common_lib"] + deps,
+    )
+    for repo, deps, data in [
+        ("covesa", _VSOMEIP_COVESA_DEPS, ["@vsomeip_covesa//:vsomeip3-cfg", "@vsomeip_covesa//:vsomeip3-sd"]),
+        ("sgmenon", _VSOMEIP_SGMENON_DEPS, ["@vsomeip_sgmenon//:vsomeip3-cfg", "@vsomeip_sgmenon//:vsomeip3-sd"]),
+    ]
+]

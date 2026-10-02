@@ -1,0 +1,32 @@
+{
+  "unicast": "@UNICAST@",
+  "netmask": "255.255.255.0",
+  "logging": { "level": "warning", "console": "true" },
+  "applications": [
+    { "name": "bench_service", "id": "0x1210" },
+    { "name": "bench_client", "id": "0x3489" },
+    { "name": "routingmanagerd", "id": "0x4000" }
+  ],
+  "services": [
+    {
+      "service": "0xbeef",
+      "instance": "0x0001",
+      "reliable": { "port": "30509", "enable-magic-cookies": "false" },
+      "unreliable": "30510",
+      "eventgroups": [
+        { "eventgroup": "0x0001", "events": ["0x8001"] }
+      ]
+    }
+  ],
+  "routing": "@ROUTING@",
+  "service-discovery": {
+    "enable": "true",
+    "multicast": "224.0.50.1",
+    "port": "30490",
+    "protocol": "udp",
+    "initial_delay_min": "0",
+    "initial_delay_max": "50",
+    "cyclic_offer_delay": "1000",
+    "ttl": "3"
+  }
+}

@@ -8,6 +8,12 @@ common --features=c++20
 
 build:opt --compilation_mode=opt
 
+# vsomeip/docker: build inside Linux containers (no host staging / manual LD paths).
+build:docker --spawn_strategy=standalone
+build:docker --genrule_strategy=standalone
+build:docker --strategy=Copy=standalone
+build:docker --define=grpc_no_ares=true
+
 build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc13
 build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc11//:cc_toolchain
 

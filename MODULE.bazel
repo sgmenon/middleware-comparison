@@ -8,7 +8,7 @@ module(
 bazel_dep(name = "rules_cc", version = "0.2.18")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "spdlog", version = "1.15.3")
+bazel_dep(name = "spdlog", version = "1.16.0.bcr.2")
 bazel_dep(name = "boost.mqtt5", version = "1.90.0.bcr.1")
 bazel_dep(name = "boost.asio", version = "1.90.0.bcr.1")
 bazel_dep(name = "boost.process", version = "1.90.0.bcr.1")
@@ -68,6 +68,37 @@ use_repo(
     "cyclonedds",
     "cyclonedds-cxx",
 )
+
+# vsomeip A/B (fork improvements vs baseline pin) — see vsomeip/notes.md
+non_module_vsomeip_repositories = use_extension("//third_party/vsomeip:extension.bzl", "vsomeip_ext")
+use_repo(
+    non_module_vsomeip_repositories,
+    "vsomeip_covesa",
+    "vsomeip_sgmenon",
+)
+
+# Dependencies for @vsomeip_* external BUILD files (aligned with boost.asio 1.90 BCR).
+bazel_dep(name = "boost.core", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.date_time", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.filesystem", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.foreach", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.functional", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.interprocess", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.system", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.property_tree", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.program_options", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.stacktrace", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.icl", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.chrono", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.context", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.coroutine", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.serialization", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.thread", version = "1.90.0.bcr.1")
+bazel_dep(name = "boost.container", version = "1.90.0.bcr.1")
+bazel_dep(name = "fmt", version = "11.1.4")
+bazel_dep(name = "liburing", version = "2.15")
+bazel_dep(name = "openssl", version = "3.3.1.bcr.1")
+bazel_dep(name = "boringssl", version = "0.20251124.0")
 
 bazel_dep(name = "bazel-toolchains", version = "1.0.0", dev_dependency = True)
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5", dev_dependency = True)
