@@ -7,6 +7,8 @@ Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing h
 
 **Metric:** one-way latency for a **full frame** — one reassembled event payload (`size` bytes), stamped before send and timed after reassembly (µs). Each run records a **distribution** over `count`={{ count }} samples (warmup={{ warmup }}). Publish **rate (Hz)** is a fixed pace so frames do not pile up; it is not swept (use a different harness if you care about CPU vs rate).
 
+Append-only history: **`{{ history_csv }}`**. This page: run **`{{ run_label }}`**.
+
 | stack | frame (B) | rate (Hz) | n | mean (µs) | p50 (µs) | p99 (µs) | gaps |
 |-------|-----------|-----------|---|-----------|----------|----------|------|
 {% for r in rows -%}
@@ -15,7 +17,7 @@ Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing h
 
 ## Frame latency vs payload size (mean of samples)
 
-Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 4 MiB). Lines use **mean**; see table for p50/p99.
+Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
 
 ```mermaid
 ---

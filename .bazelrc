@@ -59,4 +59,13 @@ build:debug --compilation_mode=dbg
 build:debug --strip never
 build:debug --platform_suffix=debug
 
+# Tracy client (--config=tracy). See third_party/tracy/README.md and vsomeip/docker/run_profile.sh
+build:tracy --@tracy//:tracy_enabled=true
+build:tracy --strip=never
+
+# Docker bridge → host Tracy: set TRACY_CLIENT_ADDRESS to a reachable host IP (e.g. 172.17.0.1).
+build:tracy_docker --config=tracy
+build:tracy_docker --copt=-DTRACY_ONLY_IPV4
+build:tracy_docker --copt=-DTRACY_NO_BROADCAST
+
 try-import %workspace%/user.bazelrc

@@ -29,12 +29,22 @@ export BAZEL_HOST_CACHE="${BAZEL_HOST_CACHE:-${HOME}/.cache}"
 export BAZEL_OUTPUT_USER_ROOT="${BAZEL_OUTPUT_USER_ROOT:-${HOME}/.cache/bazel-output}"
 export CONTAINER_HOME="${CONTAINER_HOME:-/home/bench}"
 
+# One compose stack at a time (fixed container names + shared Bazel output in containers).
+LOCK_FILE="${MW_VSOMEIP_LOCK:-/tmp/mw_vsomeip_compose.lock}"
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  echo "Another vsomeip bench holds ${LOCK_FILE} (snapshot, profile, or stale run)." >&2
+  echo "Wait for it to finish, or: cd vsomeip/docker && docker compose --profile vsomeip down" >&2
+  exit 3
+fi
+
 # shellcheck source=bazel_prebuild.sh
 source "${DIR}/bazel_prebuild.sh"
 vsomeip_bazel_prebuild "${ROOT}"
 
 echo "== docker compose (STACK=${STACK} udp) =="
 cd "${DIR}"
+docker compose --profile vsomeip down --remove-orphans >/dev/null 2>&1 || true
 docker compose --profile vsomeip build
 # Do not use --abort-on-container-exit: pub finishes the notify loop before sub collects COUNT samples.
 docker compose --profile vsomeip up --exit-code-from sub 2>&1 | tee /tmp/mw_vsomeip_compose.log

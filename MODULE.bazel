@@ -20,6 +20,7 @@ bazel_dep(name = "zenoh-cpp", version = "1.8.0")
 bazel_dep(name = "subspace", version = "2.9.1")
 bazel_dep(name = "coroutines", version = "3.3.2")
 bazel_dep(name = "flatbuffers", version = "25.2.10")
+bazel_dep(name = "zstd", version = "1.5.6")
 
 # flatbuffer_rules/build_defs.bzl loads rules_python at top-level (py helpers).
 bazel_dep(name = "rules_python", version = "1.6.3")
@@ -75,6 +76,12 @@ use_repo(
     non_module_vsomeip_repositories,
     "vsomeip_covesa",
     "vsomeip_sgmenon",
+)
+
+non_module_tracy_repositories = use_extension("//third_party/tracy:extension.bzl", "tracy_ext")
+use_repo(
+    non_module_tracy_repositories,
+    "tracy",
 )
 
 # Dependencies for @vsomeip_* external BUILD files (aligned with boost.asio 1.90 BCR).

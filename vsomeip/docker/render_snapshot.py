@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Same ladder as notes/benchmarks.md ReliablePingPong table.
-CANONICAL_SIZES = (64, 1024, 16384, 65536, 262144, 1048576, 4194304)
+CANONICAL_SIZES = (64, 1024, 16384, 65536, 262144, 1048576, 4194304, 10485760)
 
 
 def _y_max(values: list[float], *, floor: float = 1.0) -> int:
@@ -31,6 +31,25 @@ def load_rows(csv_path: Path) -> list[dict[str, str]]:
     with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         return list(reader)
+
+
+def filter_run_label(rows: list[dict[str, str]], run_label: str | None) -> list[dict[str, str]]:
+    if not run_label:
+        return rows
+    return [r for r in rows if r.get("run_label") == run_label]
+
+
+def latest_per_config(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep newest row per (stack, size, rate_hz) by recorded_utc."""
+    best: dict[tuple[str, str, str], dict[str, str]] = {}
+    for r in rows:
+        key = (r.get("stack", ""), r.get("size", ""), r.get("rate_hz", ""))
+        prev = best.get(key)
+        if prev is None or (r.get("recorded_utc", "") >= prev.get("recorded_utc", "")):
+            best[key] = r
+    out = list(best.values())
+    out.sort(key=lambda r: (r.get("stack", ""), int(r.get("size", "0") or 0)))
+    return out
 
 
 def _row_ok(r: dict[str, str]) -> bool:
@@ -73,6 +92,17 @@ def main() -> int:
     parser.add_argument("--date-utc", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
+    parser.add_argument(
+        "--run-label",
+        default="",
+        help="If set, render only rows with this run_label (full grid from one run_snapshot invocation).",
+    )
+    parser.add_argument(
+        "--history-csv",
+        type=Path,
+        default=None,
+        help="Path shown in markdown; defaults to --csv.",
+    )
     args = parser.parse_args()
 
     try:
@@ -81,8 +111,22 @@ def main() -> int:
         print("render_snapshot.py requires jinja2: pip install jinja2", file=sys.stderr)
         return 1
 
-    rows = load_rows(args.csv)
-    csv_raw = args.csv.read_text(encoding="utf-8").rstrip() + "\n"
+    all_rows = load_rows(args.csv)
+    if args.run_label:
+        rows = filter_run_label(all_rows, args.run_label)
+    else:
+        rows = latest_per_config(all_rows)
+    history_path = args.history_csv or args.csv
+    import io
+
+    if rows:
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        csv_raw = buf.getvalue()
+    else:
+        csv_raw = ""
 
     cov_labels, cov_means, cov_p99 = series_for_stack(rows, "covesa")
     sgm_labels, sgm_means, sgm_p99 = series_for_stack(rows, "sgmenon")
@@ -129,6 +173,8 @@ def main() -> int:
         sgmenon_line=fmt_line(sgm_line),
         chart_y_max=_y_max(all_numeric),
         csv_raw=csv_raw,
+        history_csv=str(history_path),
+        run_label=args.run_label or "(latest per stack/size/rate)",
     )
     args.out.write_text(rendered, encoding="utf-8")
     return 0

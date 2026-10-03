@@ -7,8 +7,12 @@ vsomeip_bazel_prebuild() {
 
   export BAZEL_OUTPUT_USER_ROOT="${BAZEL_OUTPUT_USER_ROOT:-${HOME}/.cache/bazel-output}"
 
+  local extra_configs=()
+  if [[ -n "${VSOMEIP_TRACY:-}" ]]; then
+    extra_configs+=(--config="${BAZEL_CONFIG_TRACY:-tracy_docker}")
+  fi
   echo "== bazel build //vsomeip/... (host prewarm) ==" >&2
-  (cd "${root}" && bazel build --config=opt --config=docker \
+  (cd "${root}" && bazel build --config=opt --config=docker "${extra_configs[@]}" \
     //vsomeip/... \
     @vsomeip_covesa//examples/routingmanagerd:routingmanagerd)
 }

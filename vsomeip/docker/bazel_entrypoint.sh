@@ -70,15 +70,21 @@ if [[ -n "${VSOMEIP_LOG_LEVEL:-}" ]]; then
 fi
 
 BAZEL=(bazel --batch)
+BAZEL_BENCH_CONFIGS=(--config=opt --config=docker)
+if [[ -n "${VSOMEIP_TRACY:-}" ]]; then
+  BAZEL_BENCH_CONFIGS+=(--config="${BAZEL_CONFIG_TRACY:-tracy_docker}")
+  export TRACY_CLIENT_ADDRESS="${TRACY_CLIENT_ADDRESS:-172.17.0.1}"
+  BAZEL_BENCH_CONFIGS+=(--copt=-DTRACY_CLIENT_ADDRESS=\"${TRACY_CLIENT_ADDRESS}\")
+fi
 BazelBuild() {
-  (cd "${WS}" && "${BAZEL[@]}" build --config=opt --config=docker "$@")
+  (cd "${WS}" && "${BAZEL[@]}" build "${BAZEL_BENCH_CONFIGS[@]}" "$@")
 }
 
 # Built cc_binary path (runfiles wrapper); releases Bazel locks before exec.
 BinForLabel() {
   local label="$1"
   local bin
-  bin=$(cd "${WS}" && "${BAZEL[@]}" cquery "${label}" --config=opt --config=docker --output=files 2>/dev/null | tail -1)
+  bin=$(cd "${WS}" && "${BAZEL[@]}" cquery "${label}" "${BAZEL_BENCH_CONFIGS[@]}" --output=files 2>/dev/null | tail -1)
   if [[ -z "${bin}" ]]; then
     echo "bazel cquery --output=files failed for ${label}" >&2
     exit 1
@@ -89,11 +95,12 @@ BinForLabel() {
   printf '%s' "${bin}"
 }
 
-CovesaLibDir() {
+VsomeipPluginLibDir() {
+  local repo="$1"
   local so
-  so=$(cd "${WS}" && "${BAZEL[@]}" cquery '@vsomeip_covesa//:vsomeip3-sd' --config=opt --config=docker --output=files 2>/dev/null | tail -1)
+  so=$(cd "${WS}" && "${BAZEL[@]}" cquery "@vsomeip_${repo}//:vsomeip3-sd" "${BAZEL_BENCH_CONFIGS[@]}" --output=files 2>/dev/null | tail -1)
   if [[ -z "${so}" ]]; then
-    echo "bazel cquery failed for @vsomeip_covesa//:vsomeip3-sd" >&2
+    echo "bazel cquery failed for @vsomeip_${repo}//:vsomeip3-sd" >&2
     exit 1
   fi
   if [[ "${so}" != /* ]]; then
@@ -117,7 +124,7 @@ if [[ "${STACK}" == "covesa" ]]; then
   export VSOMEIP_CONFIGURATION="${CFG_DIR}/bench.json"
   export VSOMEIP_APPLICATION_NAME="routingmanagerd"
   rm_bin="$(BinForLabel "${RM_LABEL}")"
-  export LD_LIBRARY_PATH="$(CovesaLibDir)${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  export LD_LIBRARY_PATH="$(VsomeipPluginLibDir covesa)${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
   echo "== exec routingmanagerd (unicast=${HOST_IP}) ==" >&2
   "${rm_bin}" &
   RM_PID=$!
@@ -163,12 +170,19 @@ fi
 echo "== bazel build ${BENCH} ==" >&2
 BazelBuild "${BENCH}"
 bench_bin="$(BinForLabel "${BENCH}")"
+export LD_LIBRARY_PATH="$(VsomeipPluginLibDir "${STACK}")${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 echo "== exec ${BENCH} ${bench_args[*]} ==" >&2
 if [[ "${ROLE}" == "service" ]]; then
   # Subscriber may still be starting (Bazel build) or collecting samples; do not exit and tear down compose.
   "${bench_bin}" "${bench_args[@]}"
   echo "service bench finished; waiting for subscriber (marker ${BENCH_DONE})" >&2
-  for _ in $(seq 1 240); do
+  pub_wait_sec=240
+  if [[ "${SIZE}" -ge 10485760 ]]; then
+    pub_wait_sec=3600
+  elif [[ "${SIZE}" -ge 4194304 ]]; then
+    pub_wait_sec=900
+  fi
+  for _ in $(seq 1 "${pub_wait_sec}"); do
     [[ -f "${BENCH_DONE}" ]] && break
     sleep 1
   done

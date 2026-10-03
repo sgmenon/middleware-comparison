@@ -1,5 +1,6 @@
 // SOME/IP event notify subscriber for vsomeip A/B benchmarks.
 #include "bench_common.h"
+#include "bench_tracy.h"
 #include "constants.h"
 #include "fragment.h"
 
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 #include <vector>
@@ -87,6 +89,7 @@ class EventClient {
     }
 
     void OnMessage(const std::shared_ptr<vsomeip::message>& msg) {
+        ZoneScopedN("vsomeip_bench.on_message");
         if (msg->get_message_type() != vsomeip::message_type_e::MT_NOTIFICATION) {
             return;
         }
@@ -97,7 +100,11 @@ class EventClient {
         auto pl = msg->get_payload();
         const auto* data = pl->get_data();
         const std::size_t len = pl->get_length();
-        auto assembled = reassembler_.ingest(data, len);
+        std::optional<std::vector<std::uint8_t>> assembled;
+        {
+            ZoneScopedN("vsomeip_bench.reassemble");
+            assembled = reassembler_.ingest(data, len);
+        }
         if (!assembled) {
             return;
         }
@@ -123,6 +130,7 @@ class EventClient {
         if (seq < static_cast<std::uint32_t>(opt_.warmup)) {
             return;
         }
+        VSOMEIP_BENCH_PLOT_LATENCY_US("bench.frame_latency_us", us);
         latencies_us_.push_back(us);
         if (static_cast<int>(latencies_us_.size()) >= opt_.count) {
             done_ = true;
@@ -147,10 +155,25 @@ class EventClient {
                 vsomeip_bench::TouchBenchSubDone();
                 std::quick_exit(1);
             }
-            cv_.wait_for(lock, std::chrono::seconds(120), [this] { return done_; });
+            int wait_sec = 120;
+            if (const char* v = std::getenv("VSOMEIP_BENCH_WAIT_SEC")) {
+                wait_sec = std::max(1, std::atoi(v));
+            } else if (opt_.size >= 10'485'760) {
+                wait_sec = 3600;
+            } else if (opt_.size >= 4'194'304) {
+                wait_sec = 900;
+            }
+            cv_.wait_for(lock, std::chrono::seconds(wait_sec), [this] { return done_; });
         }
         PrintCsv(opt_, latencies_us_, gap_count_);
         vsomeip_bench::TouchBenchSubDone();
+        if (std::getenv("VSOMEIP_TRACY")) {
+            FrameMark;
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            app_->clear_all_handler();
+            app_->stop();
+            return;
+        }
         // vsomeip shutdown can block indefinitely; benchmark is done.
         std::quick_exit(failed_ ? 1 : 0);
     }

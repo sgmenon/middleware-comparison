@@ -1,5 +1,6 @@
 // SOME/IP event notify publisher for vsomeip A/B benchmarks.
 #include "bench_common.h"
+#include "bench_tracy.h"
 #include "constants.h"
 #include "fragment.h"
 
@@ -87,12 +88,18 @@ class EventService {
         const int total = opt_.warmup + opt_.count;
 
         for (int i = 0; i < total; ++i) {
+            ZoneScopedN("vsomeip_bench.publish_frame");
             const auto t0 = std::chrono::steady_clock::now();
             const std::uint64_t send_ns = vsomeip_bench::NowNs();
-            StampPayload(body.data(), body.size(), send_ns, seq);
+            {
+                ZoneScopedN("vsomeip_bench.stamp");
+                StampPayload(body.data(), body.size(), send_ns, seq);
+            }
             const auto chunks = FragmentPayload(seq, body.data(), body.size(), opt_.max_datagram);
+            TracyPlot("bench.fragments_per_frame", static_cast<int64_t>(chunks.size()));
 
             for (const auto& chunk : chunks) {
+                ZoneScopedN("vsomeip_bench.notify");
                 auto payload = vsomeip::runtime::get()->create_payload();
                 payload->set_data(chunk);
                 app_->notify(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, payload);

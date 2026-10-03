@@ -6,21 +6,25 @@ cc_library(
     name = "bench_common_lib",
     hdrs = [
         "bench_common.h",
+        "bench_tracy.h",
         "constants.h",
         "fragment.h",
     ],
     includes = ["."],
+    deps = ["@tracy"],
 )
 
 _VSOMEIP_COVESA_DEPS = [
     "@vsomeip_covesa//:vsomeip",
     "@vsomeip_covesa//:vsomeip-sd",
     "@vsomeip_covesa//:vsomeip-cfg",
+    "@vsomeip_covesa//:vsomeip-e2e",
 ]
 
 _VSOMEIP_SGMENON_DEPS = [
     "@vsomeip_sgmenon//:vsomeip",
     "@vsomeip_sgmenon//:vsomeip-sd",
+    "@vsomeip_sgmenon//:vsomeip-e2e",
 ]
 
 # buildifier: disable=no-effect
@@ -38,6 +42,7 @@ _VSOMEIP_SGMENON_DEPS = [
             [
                 "@vsomeip_covesa//:vsomeip3-cfg",
                 "@vsomeip_covesa//:vsomeip3-sd",
+                "@vsomeip_covesa//:vsomeip3-e2e",
             ],
         ),
         (
@@ -46,6 +51,7 @@ _VSOMEIP_SGMENON_DEPS = [
             [
                 "@vsomeip_sgmenon//:vsomeip3-cfg",
                 "@vsomeip_sgmenon//:vsomeip3-sd",
+                "@vsomeip_sgmenon//:vsomeip3-e2e",
             ],
         ),
     ]
@@ -63,6 +69,7 @@ _VSOMEIP_SGMENON_DEPS = [
             [
                 "@vsomeip_covesa//:vsomeip3-cfg",
                 "@vsomeip_covesa//:vsomeip3-sd",
+                "@vsomeip_covesa//:vsomeip3-e2e",
             ],
         ),
         (
@@ -71,6 +78,7 @@ _VSOMEIP_SGMENON_DEPS = [
             [
                 "@vsomeip_sgmenon//:vsomeip3-cfg",
                 "@vsomeip_sgmenon//:vsomeip3-sd",
+                "@vsomeip_sgmenon//:vsomeip3-e2e",
             ],
         ),
     ]

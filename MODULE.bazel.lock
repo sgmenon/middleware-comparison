@@ -780,7 +780,9 @@
     "https://bcr.bazel.build/modules/zlib/1.3.1.bcr.5/MODULE.bazel": "eec517b5bbe5492629466e11dae908d043364302283de25581e3eb944326c4ca",
     "https://bcr.bazel.build/modules/zlib/1.3.1.bcr.5/source.json": "22bc55c47af97246cfc093d0acf683a7869377de362b5d1c552c2c2e16b7a806",
     "https://bcr.bazel.build/modules/zlib/1.3.1/MODULE.bazel": "751c9940dcfe869f5f7274e1295422a34623555916eb98c174c1e945594bf198",
-    "https://bcr.bazel.build/modules/zlib/1.3/MODULE.bazel": "6a9c02f19a24dcedb05572b2381446e27c272cd383aed11d41d99da9e3167a72"
+    "https://bcr.bazel.build/modules/zlib/1.3/MODULE.bazel": "6a9c02f19a24dcedb05572b2381446e27c272cd383aed11d41d99da9e3167a72",
+    "https://bcr.bazel.build/modules/zstd/1.5.6/MODULE.bazel": "471ebe7d3cdd8c6469390fcf623eb4779ff55fbee0a87f1dc57a1def468b96d4",
+    "https://bcr.bazel.build/modules/zstd/1.5.6/source.json": "02010c3333fc89b44fe861db049968decb6e688411f7f9d4f6791d74f9adfb51"
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
@@ -813,6 +815,26 @@
           "iceoryx": {
             "repoRuleId": "@@//third_party/iceoryx:extension.bzl%get_iceoryx",
             "attributes": {}
+          }
+        }
+      }
+    },
+    "//third_party/tracy:extension.bzl%tracy_ext": {
+      "general": {
+        "bzlTransitiveDigest": "sqa8jhsYjylMZE4ub74uUmKmB9z3YvbBypKczoPrdN0=",
+        "usagesDigest": "thf9kWdYubPf1CCEUUdHTcT+qIeEOD9xhSE7v64eBWU=",
+        "recordedInputs": [
+          "REPO_MAPPING:,bazel_tools bazel_tools"
+        ],
+        "generatedRepoSpecs": {
+          "tracy": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "build_file": "@@//third_party/tracy:tracy.BUILD",
+              "sha256": "03580b01df3c435f74eec165193d6557cdbf3a84d39582ca30969ef5354560aa",
+              "strip_prefix": "tracy-0.12.1",
+              "url": "https://github.com/wolfpld/tracy/archive/refs/tags/v0.12.1.tar.gz"
+            }
           }
         }
       }

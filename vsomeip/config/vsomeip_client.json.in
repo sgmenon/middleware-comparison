@@ -7,6 +7,20 @@
     { "name": "bench_client", "id": "0x3489" },
     { "name": "routingmanagerd", "id": "0x4000" }
   ],
+  "e2e": {
+    "e2e_enabled": "true",
+    "protected": [
+      {
+        "service_id": "0xbeef",
+        "event_id": "0x8001",
+        "profile": "P04",
+        "variant": "checker",
+        "crc_offset": "64",
+        "data_id": "0xbeef",
+        "max_data_length": "83886080"
+      }
+    ]
+  },
   "clients": [
     {
       "service": "0xbeef",
