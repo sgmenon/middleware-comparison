@@ -1,118 +1,96 @@
 #pragma once
 
+#include "constants.h"
+
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <map>
 #include <optional>
 #include <vector>
 
 namespace vsomeip_bench {
 
-inline constexpr std::uint32_t kFragMagic = 0x56424652u;  // 'VBFR'
-
+// A frame is one contiguous block sent as `count` notifies of about `len` bytes each. Every chunk
+// starts with a ChunkHeader; chunk 0 also carries the frame's send_ns right after it.
 #pragma pack(push, 1)
-struct FragHeader {
-    std::uint32_t magic = kFragMagic;
-    std::uint32_t message_id = 0;
+struct ChunkHeader {
+    std::uint32_t seq = 0;
     std::uint16_t index = 0;
     std::uint16_t count = 1;
-    std::uint32_t total_length = 0;
 };
 #pragma pack(pop)
 
-inline std::size_t MaxFragmentPayload(std::size_t max_datagram) {
-    if (max_datagram <= sizeof(FragHeader)) {
-        return 0;
-    }
-    return max_datagram - sizeof(FragHeader);
+inline constexpr std::size_t kChunkSendNsOffset = sizeof(ChunkHeader);
+inline constexpr std::size_t kMinFrameBytes = kChunkSendNsOffset + 8;
+
+struct ChunkPlan {
+    std::size_t count = 1;
+    std::size_t len = 0;  // chunk i covers [i*len, min((i+1)*len, size))
+};
+
+// Even split so no chunk is smaller than size/count; the E2E header shares the datagram on both stacks.
+inline ChunkPlan PlanChunks(std::size_t size, std::size_t max_datagram) {
+    const std::size_t budget = max_datagram - kE2eHeaderBytes;
+    ChunkPlan plan;
+    plan.count = (size + budget - 1) / budget;
+    plan.len = (size + plan.count - 1) / plan.count;
+    return plan;
 }
 
-inline std::vector<std::vector<std::uint8_t>> FragmentPayload(std::uint32_t message_id, const std::uint8_t* data, std::size_t length,
-                                                              std::size_t max_datagram) {
-    const std::size_t chunk = MaxFragmentPayload(max_datagram);
-    if (chunk == 0 || length <= chunk) {
-        std::vector<std::uint8_t> single(length);
-        if (length > 0) {
-            std::memcpy(single.data(), data, length);
-        }
-        return {std::move(single)};
+inline void WriteChunkHeaders(std::vector<std::uint8_t>& block, std::uint32_t seq, const ChunkPlan& plan) {
+    for (std::size_t i = 0; i < plan.count; ++i) {
+        const ChunkHeader hdr{seq, static_cast<std::uint16_t>(i), static_cast<std::uint16_t>(plan.count)};
+        std::memcpy(block.data() + i * plan.len, &hdr, sizeof(hdr));
     }
-    const std::uint16_t count = static_cast<std::uint16_t>((length + chunk - 1) / chunk);
-    std::vector<std::vector<std::uint8_t>> out;
-    out.reserve(count);
-    for (std::uint16_t i = 0; i < count; ++i) {
-        const std::size_t off = static_cast<std::size_t>(i) * chunk;
-        const std::size_t n = std::min(chunk, length - off);
-        std::vector<std::uint8_t> buf(sizeof(FragHeader) + n);
-        FragHeader hdr{};
-        hdr.message_id = message_id;
-        hdr.index = i;
-        hdr.count = count;
-        hdr.total_length = static_cast<std::uint32_t>(length);
-        std::memcpy(buf.data(), &hdr, sizeof(hdr));
-        std::memcpy(buf.data() + sizeof(hdr), data + off, n);
-        out.push_back(std::move(buf));
-    }
-    return out;
 }
 
-class Reassembler {
+inline void StampSendNs(std::vector<std::uint8_t>& block, std::uint64_t send_ns) {
+    std::memcpy(block.data() + kChunkSendNsOffset, &send_ns, 8);
+}
+
+struct CompletedFrame {
+    std::uint32_t seq = 0;
+    std::uint64_t send_ns = 0;
+};
+
+// Follows chunks in arrival order; reports a frame when its last chunk arrives and none were missed.
+class FrameTracker {
    public:
-    // Returns complete logical payload when all fragments arrived; empty optional otherwise.
-    std::optional<std::vector<std::uint8_t>> ingest(const std::uint8_t* data, std::size_t length) {
-        if (length < sizeof(FragHeader)) {
+    std::optional<CompletedFrame> ingest(const std::uint8_t* data, std::size_t length) {
+        // COVESA: skip the in-payload E2E header the stack leaves in place.
+        if (length < kE2eHoleBytes + sizeof(ChunkHeader)) {
             return std::nullopt;
         }
-        FragHeader hdr{};
+        data += kE2eHoleBytes;
+        length -= kE2eHoleBytes;
+        ChunkHeader hdr{};
         std::memcpy(&hdr, data, sizeof(hdr));
-        if (hdr.magic != kFragMagic || hdr.count == 0) {
-            if (length == 0) {
+        if (hdr.index == 0) {
+            if (length < kMinFrameBytes) {
+                active_ = false;
                 return std::nullopt;
             }
-            std::vector<std::uint8_t> raw(length);
-            std::memcpy(raw.data(), data, length);
-            return raw;
+            active_ = true;
+            seq_ = hdr.seq;
+            next_ = 0;
+            std::memcpy(&send_ns_, data + kChunkSendNsOffset, 8);
         }
-        const std::size_t payload_len = length - sizeof(FragHeader);
-        auto& partial = partial_[hdr.message_id];
-        if (partial.total == 0) {
-            partial.total = hdr.total_length;
-            partial.count = hdr.count;
-            partial.parts.resize(hdr.count);
-            partial.have = 0;
-        }
-        if (hdr.index >= partial.parts.size()) {
+        if (!active_ || hdr.seq != seq_ || hdr.index != next_) {
+            active_ = false;
             return std::nullopt;
         }
-        if (partial.parts[hdr.index].empty()) {
-            partial.parts[hdr.index].assign(data + sizeof(FragHeader), data + length);
-            ++partial.have;
-        }
-        if (partial.have < partial.count) {
+        if (++next_ < hdr.count) {
             return std::nullopt;
         }
-        std::vector<std::uint8_t> assembled(partial.total);
-        std::size_t off = 0;
-        for (const auto& p : partial.parts) {
-            if (off + p.size() > assembled.size()) {
-                partial_ = {};
-                return std::nullopt;
-            }
-            std::memcpy(assembled.data() + off, p.data(), p.size());
-            off += p.size();
-        }
-        partial_.erase(hdr.message_id);
-        return assembled;
+        active_ = false;
+        return CompletedFrame{seq_, send_ns_};
     }
 
    private:
-    struct Partial {
-        std::uint32_t total = 0;
-        std::uint16_t count = 0;
-        std::uint16_t have = 0;
-        std::vector<std::vector<std::uint8_t>> parts;
-    };
-    std::map<std::uint32_t, Partial> partial_;
+    bool active_ = false;
+    std::uint32_t seq_ = 0;
+    std::uint16_t next_ = 0;
+    std::uint64_t send_ns_ = 0;
 };
 
 }  // namespace vsomeip_bench

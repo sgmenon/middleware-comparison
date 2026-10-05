@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import math
 import sys
 from pathlib import Path
@@ -83,77 +84,131 @@ def series_for_stack(rows: list[dict[str, str]], stack: str) -> tuple[list[str],
     return labels, means, p99s
 
 
+def comparison_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Pair covesa/sgmenon results by size and rate for the summary table."""
+    by_config: dict[tuple[int, str], dict[str, dict[str, str]]] = {}
+    for row in rows:
+        try:
+            size = int(row["size"])
+        except (KeyError, ValueError):
+            continue
+        stack = row.get("stack", "")
+        if stack not in ("covesa", "sgmenon"):
+            continue
+        by_config.setdefault((size, row.get("rate_hz", "")), {})[stack] = row
+
+    out: list[dict[str, str]] = []
+    for (size, rate), pair in sorted(by_config.items()):
+        cov = pair.get("covesa")
+        sgm = pair.get("sgmenon")
+        cov_mean = cov.get("mean_us", "NA") if cov else "NA"
+        sgm_mean = sgm.get("mean_us", "NA") if sgm else "NA"
+        improvement = "NA"
+        try:
+            cov_value = float(cov_mean)
+            sgm_value = float(sgm_mean)
+            improvement = f"{(cov_value - sgm_value) / cov_value * 100.0:.1f}%"
+        except (ValueError, ZeroDivisionError):
+            pass
+
+        cov_n = cov.get("n", "NA") if cov else "NA"
+        sgm_n = sgm.get("n", "NA") if sgm else "NA"
+        out.append(
+            {
+                "size": str(size),
+                "size_label": size_label(size),
+                "rate_hz": rate,
+                "n": cov_n if cov_n == sgm_n else f"{cov_n} / {sgm_n}",
+                "cov_mean_us": cov_mean,
+                "sgm_mean_us": sgm_mean,
+                "cov_p99_us": cov.get("p99_us", "NA") if cov else "NA",
+                "sgm_p99_us": sgm.get("p99_us", "NA") if sgm else "NA",
+                "sgm_improvement": improvement,
+            }
+        )
+    return out
+
+
+def make_dataset(csv_path: Path, run_label: str, transport: str) -> dict[str, object]:
+    all_rows = load_rows(csv_path) if csv_path.exists() else []
+    rows = filter_run_label(all_rows, run_label) if run_label else latest_per_config(all_rows)
+
+    csv_raw = ""
+    if rows:
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), extrasaction="ignore", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        csv_raw = buf.getvalue()
+
+    cov_labels, cov_means, _ = series_for_stack(rows, "covesa")
+    sgm_labels, sgm_means, _ = series_for_stack(rows, "sgmenon")
+    size_labels = [
+        size_label(size)
+        for size in CANONICAL_SIZES
+        if size_label(size) in cov_labels or size_label(size) in sgm_labels
+    ]
+
+    def align(labels: list[str], values: list[float]) -> list[float | None]:
+        values_by_label = dict(zip(labels, values, strict=False))
+        return [values_by_label.get(label) for label in size_labels]
+
+    def fmt_line(values: list[float | None]) -> str:
+        return ", ".join("0" if value is None else f"{value:.3f}" for value in values)
+
+    cov_line = align(cov_labels, cov_means)
+    sgm_line = align(sgm_labels, sgm_means)
+    all_numeric = [value for value in cov_line + sgm_line if value is not None]
+    return {
+        "transport": transport,
+        "run_label": run_label or "(latest per stack/size/rate)",
+        "history_csv": str(csv_path),
+        "comparisons": comparison_rows(rows),
+        "size_labels": size_labels,
+        "covesa_line": fmt_line(cov_line),
+        "sgmenon_line": fmt_line(sgm_line),
+        "chart_y_max": _y_max(all_numeric),
+        "csv_raw": csv_raw,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", type=Path, required=True)
+    parser.add_argument("--udp-csv", type=Path)
+    parser.add_argument("--tcp-csv", type=Path)
+    # Compatibility with a run_snapshot.sh process started before the dual-CSV renderer update.
+    parser.add_argument("--csv", type=Path)
+    parser.add_argument("--transport", choices=("udp", "tcp"))
+    parser.add_argument("--run-label", default="")
+    parser.add_argument("--history-csv", type=Path)
+    parser.add_argument("--count", type=int)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--git-sha", required=True)
     parser.add_argument("--date-utc", required=True)
-    parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
-    parser.add_argument(
-        "--run-label",
-        default="",
-        help="If set, render only rows with this run_label (full grid from one run_snapshot invocation).",
-    )
-    parser.add_argument(
-        "--history-csv",
-        type=Path,
-        default=None,
-        help="Path shown in markdown; defaults to --csv.",
-    )
+    parser.add_argument("--udp-run-label", default="")
+    parser.add_argument("--tcp-run-label", default="")
     args = parser.parse_args()
+
+    if args.csv:
+        csv_dir = args.csv.parent
+        if args.transport == "tcp":
+            args.tcp_csv = args.csv
+            args.tcp_run_label = args.run_label
+            args.udp_csv = args.udp_csv or csv_dir / "snapshot.csv"
+        else:
+            args.udp_csv = args.csv
+            args.udp_run_label = args.run_label
+            args.tcp_csv = args.tcp_csv or csv_dir / "snapshot-tcp.csv"
+    if not args.udp_csv or not args.tcp_csv:
+        parser.error("--udp-csv and --tcp-csv are required")
 
     try:
         from jinja2 import Environment, FileSystemLoader, select_autoescape
     except ImportError:
         print("render_snapshot.py requires jinja2: pip install jinja2", file=sys.stderr)
         return 1
-
-    all_rows = load_rows(args.csv)
-    if args.run_label:
-        rows = filter_run_label(all_rows, args.run_label)
-    else:
-        rows = latest_per_config(all_rows)
-    history_path = args.history_csv or args.csv
-    import io
-
-    if rows:
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-        csv_raw = buf.getvalue()
-    else:
-        csv_raw = ""
-
-    cov_labels, cov_means, cov_p99 = series_for_stack(rows, "covesa")
-    sgm_labels, sgm_means, sgm_p99 = series_for_stack(rows, "sgmenon")
-
-    # Shared x-axis: union of sizes present in either stack (canonical order).
-    size_labels: list[str] = []
-    for size in CANONICAL_SIZES:
-        lab = size_label(size)
-        if lab in cov_labels or lab in sgm_labels:
-            size_labels.append(lab)
-
-    def align(labels: list[str], values: list[float]) -> list[float | None]:
-        m = dict(zip(labels, values, strict=False))
-        return [m.get(lab) for lab in size_labels]
-
-    cov_line = align(cov_labels, cov_means)
-    sgm_line = align(sgm_labels, sgm_means)
-    all_numeric = [v for v in cov_line + sgm_line if v is not None]
-
-    def fmt_line(vals: list[float | None]) -> str:
-        parts: list[str] = []
-        for v in vals:
-            if v is None:
-                parts.append("0")
-            else:
-                parts.append(f"{v:.3f}")
-        return ", ".join(parts)
 
     env = Environment(
         loader=FileSystemLoader(args.template.parent),
@@ -165,16 +220,11 @@ def main() -> int:
     rendered = template.render(
         git_sha=args.git_sha,
         date_utc=args.date_utc,
-        count=args.count,
         warmup=args.warmup,
-        rows=rows,
-        size_labels=size_labels,
-        covesa_line=fmt_line(cov_line),
-        sgmenon_line=fmt_line(sgm_line),
-        chart_y_max=_y_max(all_numeric),
-        csv_raw=csv_raw,
-        history_csv=str(history_path),
-        run_label=args.run_label or "(latest per stack/size/rate)",
+        datasets=[
+            make_dataset(args.tcp_csv, args.tcp_run_label, "tcp"),
+            make_dataset(args.udp_csv, args.udp_run_label, "udp"),
+        ],
     )
     args.out.write_text(rendered, encoding="utf-8")
     return 0

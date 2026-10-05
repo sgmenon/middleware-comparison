@@ -1,4 +1,9 @@
 bench_results/
+!bench_results/
+bench_results/*
+!bench_results/vsomeip/
+bench_results/vsomeip/*
+!bench_results/vsomeip/snapshot-tcp.csv
 docker/net/staging/
 vsomeip/docker/staging/
 vsomeip/docker/.bench-sub-done
@@ -9,3 +14,4 @@ bazel-*
 user.bazelrc
 .notes/
 *.pdf
+__pycache__/

@@ -11,6 +11,8 @@ COUNT="${COUNT:-1000}"
 RATE_HZ="${RATE_HZ:-1000}"
 WARMUP="${WARMUP:-50}"
 MAX_DATAGRAM="${MAX_DATAGRAM:-1400}"
+RPC_CALLS="${RPC_CALLS:-0}"
+TRANSPORT="${TRANSPORT:-udp}"
 
 case "${STACK}" in
   covesa|sgmenon) ;;
@@ -19,8 +21,15 @@ case "${STACK}" in
     exit 2
     ;;
 esac
+case "${TRANSPORT}" in
+  udp|tcp) ;;
+  *)
+    echo "TRANSPORT must be udp or tcp (got ${TRANSPORT})" >&2
+    exit 2
+    ;;
+esac
 
-export STACK SIZE COUNT RATE_HZ WARMUP MAX_DATAGRAM
+export STACK SIZE COUNT RATE_HZ WARMUP MAX_DATAGRAM RPC_CALLS TRANSPORT
 export REPO_ROOT="${ROOT}"
 export HOST_UID="${HOST_UID:-$(id -u)}"
 export HOST_GID="${HOST_GID:-$(id -g)}"
@@ -42,7 +51,7 @@ fi
 source "${DIR}/bazel_prebuild.sh"
 vsomeip_bazel_prebuild "${ROOT}"
 
-echo "== docker compose (STACK=${STACK} udp) =="
+echo "== docker compose (STACK=${STACK} ${TRANSPORT}) =="
 cd "${DIR}"
 docker compose --profile vsomeip down --remove-orphans >/dev/null 2>&1 || true
 docker compose --profile vsomeip build
@@ -50,6 +59,9 @@ docker compose --profile vsomeip build
 docker compose --profile vsomeip up --exit-code-from sub 2>&1 | tee /tmp/mw_vsomeip_compose.log
 
 echo "== result =="
+if [[ "${RPC_CALLS}" -gt 0 ]]; then
+  sed -n 's/.*[[:space:]]| //p' /tmp/mw_vsomeip_compose.log | grep -E '^rpc' || true
+fi
 docker compose --profile vsomeip logs sub 2>/dev/null | sed -n 's/.*[[:space:]]| //p' | grep -E '^(sgmenon|covesa),' || \
   sed -n 's/.*[[:space:]]| //p' /tmp/mw_vsomeip_compose.log | grep -E '^(sgmenon|covesa),' || \
   grep -E '^(sgmenon|covesa),' /tmp/mw_vsomeip_compose.log || true

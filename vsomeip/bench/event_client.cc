@@ -25,7 +25,6 @@ using vsomeip_bench::Options;
 using vsomeip_bench::ParseOptions;
 using vsomeip_bench::PrintCsv;
 using vsomeip_bench::ReadStamp;
-using vsomeip_bench::Reassembler;
 
 class EventClient {
    public:
@@ -71,9 +70,17 @@ class EventClient {
                 return;
             }
         }
+        if (opt_.rpc_calls > 0) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            available_ = true;
+            cv_.notify_all();
+            return;
+        }
         std::set<vsomeip::eventgroup_t> groups{vsomeip_bench::kEventgroupId};
+        const auto reliability =
+            opt_.transport == "tcp" ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE;
         app_->request_event(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, groups,
-                            vsomeip::event_type_e::ET_EVENT, vsomeip::reliability_type_e::RT_UNRELIABLE);
+                            vsomeip::event_type_e::ET_EVENT, reliability);
         app_->subscribe(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventgroupId);
         if (const char* sync_dir = std::getenv("VSOMEIP_BENCH_SYNC_DIR")) {
             std::filesystem::path ready = std::filesystem::path(sync_dir) / ".bench-sub-ready";
@@ -90,6 +97,10 @@ class EventClient {
 
     void OnMessage(const std::shared_ptr<vsomeip::message>& msg) {
         ZoneScopedN("vsomeip_bench.on_message");
+        if (msg->get_message_type() == vsomeip::message_type_e::MT_RESPONSE && msg->get_method() == vsomeip_bench::kEchoMethodId) {
+            OnEchoResponse(msg);
+            return;
+        }
         if (msg->get_message_type() != vsomeip::message_type_e::MT_NOTIFICATION) {
             return;
         }
@@ -97,32 +108,17 @@ class EventClient {
             msg->get_method() != vsomeip_bench::kEventId) {
             return;
         }
-        auto pl = msg->get_payload();
-        const auto* data = pl->get_data();
-        const std::size_t len = pl->get_length();
-        std::optional<std::vector<std::uint8_t>> assembled;
-        {
-            ZoneScopedN("vsomeip_bench.reassemble");
-            assembled = reassembler_.ingest(data, len);
-        }
-        if (!assembled) {
-            return;
-        }
-        if (assembled->size() != opt_.size) {
-            return;
-        }
-
-        std::uint64_t send_ns = 0;
-        std::uint32_t seq = 0;
-        if (!ReadStamp(assembled->data(), assembled->size(), &send_ns, &seq)) {
-            return;
-        }
-
         const std::uint64_t recv_ns = vsomeip_bench::NowNs();
-        const double us = static_cast<double>(recv_ns - send_ns) / 1000.0;
+        auto pl = msg->get_payload();
+        const auto frame = tracker_.ingest(pl->get_data(), pl->get_length());
+        if (!frame) {
+            return;
+        }
+        const std::uint32_t seq = frame->seq;
+        const double us = static_cast<double>(recv_ns - frame->send_ns) / 1000.0;
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (seq > last_seq_ + 1) {
+        if (last_seq_ != 0 && seq > last_seq_ + 1) {
             gap_count_ += seq - last_seq_ - 1;
         }
         last_seq_ = seq;
@@ -136,6 +132,69 @@ class EventClient {
             done_ = true;
             cv_.notify_all();
         }
+    }
+
+    void OnEchoResponse(const std::shared_ptr<vsomeip::message>& msg) {
+        const std::uint64_t recv_ns = vsomeip_bench::NowNs();
+        auto pl = msg->get_payload();
+        std::uint64_t send_ns = 0;
+        std::uint32_t seq = 0;
+        if (!ReadStamp(pl->get_data(), pl->get_length(), &send_ns, &seq)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (seq != rpc_pending_seq_) {
+            return;
+        }
+        rpc_rtt_us_ = static_cast<double>(recv_ns - send_ns) / 1000.0;
+        rpc_done_ = true;
+        cv_.notify_all();
+    }
+
+    /** Calls the echo method rpc_calls times (one in flight) and prints each round trip. */
+    void RunEchoCalls() {
+        if (opt_.transport == "udp" && opt_.size > opt_.max_datagram) {
+            std::fprintf(stderr, "rpc: --size=%zu exceeds one datagram (%zu); echo method is not fragmented\n", opt_.size,
+                         opt_.max_datagram);
+            failed_ = true;
+            return;
+        }
+        std::vector<double> rtts;
+        std::vector<std::uint8_t> buf(opt_.size);
+        for (int i = 0; i < opt_.rpc_calls; ++i) {
+            const auto seq = static_cast<std::uint32_t>(i);
+            vsomeip_bench::StampPayload(buf.data(), buf.size(), vsomeip_bench::NowNs(), seq);
+            auto req = vsomeip::runtime::get()->create_request(opt_.transport == "tcp");
+            req->set_service(vsomeip_bench::kServiceId);
+            req->set_instance(vsomeip_bench::kInstanceId);
+            req->set_method(vsomeip_bench::kEchoMethodId);
+            auto payload = vsomeip::runtime::get()->create_payload();
+            payload->set_data(buf);
+            req->set_payload(payload);
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                rpc_pending_seq_ = seq;
+                rpc_done_ = false;
+            }
+            {
+                ZoneScopedN("vsomeip_bench.rpc_send");
+                app_->send(req);
+            }
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (!cv_.wait_for(lock, std::chrono::seconds(2), [this] { return rpc_done_; })) {
+                std::printf("rpc %s size=%zu call=%d timeout\n", opt_.stack.c_str(), opt_.size, i);
+                continue;
+            }
+            std::printf("rpc %s size=%zu call=%d rtt_us=%.3f\n", opt_.stack.c_str(), opt_.size, i, rpc_rtt_us_);
+            rtts.push_back(rpc_rtt_us_);
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::duration<double>(1.0 / opt_.rate_hz));
+        }
+        std::printf("rpc_summary %s size=%zu ok=%zu/%d mean_us=%.3f p50_us=%.3f min_us=%.3f max_us=%.3f\n", opt_.stack.c_str(), opt_.size,
+                    rtts.size(), opt_.rpc_calls, vsomeip_bench::MeanUs(rtts), vsomeip_bench::PercentileUs(rtts, 0.5),
+                    rtts.empty() ? 0.0 : *std::min_element(rtts.begin(), rtts.end()),
+                    rtts.empty() ? 0.0 : *std::max_element(rtts.begin(), rtts.end()));
+        std::fflush(stdout);
     }
 
     void WaitAndReport() {
@@ -155,6 +214,18 @@ class EventClient {
                 vsomeip_bench::TouchBenchSubDone();
                 std::quick_exit(1);
             }
+        }
+        if (opt_.rpc_calls > 0) {
+            RunEchoCalls();
+            vsomeip_bench::TouchBenchSubDone();
+            if (std::getenv("VSOMEIP_TRACY")) {
+                FrameMark;
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            std::quick_exit(failed_ ? 1 : 0);
+        }
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
             int wait_sec = 120;
             if (const char* v = std::getenv("VSOMEIP_BENCH_WAIT_SEC")) {
                 wait_sec = std::max(1, std::atoi(v));
@@ -180,13 +251,16 @@ class EventClient {
 
     Options opt_;
     std::shared_ptr<vsomeip::application> app_;
-    Reassembler reassembler_;
+    vsomeip_bench::FrameTracker tracker_;
     std::mutex mutex_;
     std::condition_variable cv_;
     bool registered_{false};
     bool available_{false};
     bool done_{false};
     bool failed_{false};
+    std::uint32_t rpc_pending_seq_{0};
+    bool rpc_done_{false};
+    double rpc_rtt_us_{0};
     std::uint32_t last_seq_{0};
     std::uint64_t gap_count_{0};
     std::vector<double> latencies_us_;

@@ -21,6 +21,7 @@ COUNT="${COUNT:-1000}"
 RATE_HZ="${RATE_HZ:-1000}"
 WARMUP="${WARMUP:-50}"
 MAX_DATAGRAM="${MAX_DATAGRAM:-1400}"
+TRANSPORT="${TRANSPORT:-udp}"
 
 CLIENT_IP="${CLIENT_IP:-172.29.0.2}"
 SERVICE_IP="${SERVICE_IP:-172.29.0.3}"
@@ -36,6 +37,13 @@ case "${STACK}" in
   covesa|sgmenon) ;;
   *)
     echo "STACK must be covesa|sgmenon (got ${STACK})" >&2
+    exit 2
+    ;;
+esac
+case "${TRANSPORT}" in
+  udp|tcp) ;;
+  *)
+    echo "TRANSPORT must be udp|tcp (got ${TRANSPORT})" >&2
     exit 2
     ;;
 esac
@@ -59,15 +67,14 @@ else
   RM_LABEL=""
 fi
 
-CFG_TPL="${TPL}/vsomeip.json.in"
-if [[ "${ROLE}" == "client" ]]; then
-  CFG_TPL="${TPL}/vsomeip_client.json.in"
-fi
-sed -e "s/@UNICAST@/${UNICAST}/g" -e "s/@ROUTING@/${ROUTING}/g" \
-  "${CFG_TPL}" > "${CFG_DIR}/bench.json"
-if [[ -n "${VSOMEIP_LOG_LEVEL:-}" ]]; then
-  sed -i "s/\"level\": \"warning\"/\"level\": \"${VSOMEIP_LOG_LEVEL}\"/" "${CFG_DIR}/bench.json"
-fi
+CRC_OFFSET=$([[ "${STACK}" == "covesa" ]] && echo 64 || echo 0)
+python3 "${TPL}/render_config.py" \
+  --template "${TPL}/vsomeip.json.jinja" \
+  --out "${CFG_DIR}/bench.json" \
+  --unicast "${UNICAST}" \
+  --routing "${ROUTING}" \
+  --crc-offset "${CRC_OFFSET}" \
+  --transport "${TRANSPORT}"
 
 BAZEL=(bazel --batch)
 BAZEL_BENCH_CONFIGS=(--config=opt --config=docker)
@@ -154,6 +161,8 @@ bench_args=(
   --warmup="${WARMUP}"
   --rate-hz="${RATE_HZ}"
   --max-datagram="${MAX_DATAGRAM}"
+  --transport="${TRANSPORT}"
+  --rpc-calls="${RPC_CALLS:-0}"
 )
 
 export VSOMEIP_CONFIGURATION="${CFG_DIR}/bench.json"

@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iproute2 \
         libstdc++6 \
         python3 \
+        python3-jinja2 \
         util-linux \
         unzip \
         zip \

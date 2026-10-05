@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <set>
@@ -18,10 +19,11 @@
 
 namespace {
 
-using vsomeip_bench::FragmentPayload;
 using vsomeip_bench::Options;
 using vsomeip_bench::ParseOptions;
-using vsomeip_bench::StampPayload;
+using vsomeip_bench::PlanChunks;
+using vsomeip_bench::StampSendNs;
+using vsomeip_bench::WriteChunkHeaders;
 
 class EventService {
    public:
@@ -34,9 +36,10 @@ class EventService {
         }
         app_->register_state_handler([this](vsomeip::state_type_e st) { OnState(st); });
         std::set<vsomeip::eventgroup_t> groups{vsomeip_bench::kEventgroupId};
+        const auto reliability =
+            opt_.transport == "tcp" ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE;
         app_->offer_event(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, groups,
-                          vsomeip::event_type_e::ET_EVENT, std::chrono::milliseconds::zero(), false, true, nullptr,
-                          vsomeip::reliability_type_e::RT_UNRELIABLE);
+                          vsomeip::event_type_e::ET_EVENT, std::chrono::milliseconds::zero(), false, true, nullptr, reliability);
         app_->register_subscription_handler(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventgroupId,
                                             [this](vsomeip::client_t, std::uint32_t, std::uint32_t, bool subscribed) {
                                                 if (subscribed) {
@@ -46,6 +49,13 @@ class EventService {
                                                 }
                                                 return true;
                                             });
+        app_->register_message_handler(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEchoMethodId,
+                                       [this](const std::shared_ptr<vsomeip::message>& req) {
+                                           ZoneScopedN("vsomeip_bench.echo");
+                                           auto resp = vsomeip::runtime::get()->create_response(req);
+                                           resp->set_payload(req->get_payload());
+                                           app_->send(resp);
+                                       });
 
         worker_ = std::thread([this] { Worker(); });
         app_->start();
@@ -83,26 +93,36 @@ class EventService {
         }
 
         const auto period = std::chrono::duration<double>(1.0 / opt_.rate_hz);
-        std::vector<std::uint8_t> body(opt_.size);
         std::uint32_t seq = 0;
         const int total = opt_.warmup + opt_.count;
+
+        const auto plan = opt_.transport == "tcp" ? vsomeip_bench::ChunkPlan{1, opt_.size} : PlanChunks(opt_.size, opt_.max_datagram);
+        TracyPlot("bench.fragments_per_frame", static_cast<int64_t>(plan.count));
+        std::vector<std::uint8_t> block(opt_.size);
+        for (std::size_t j = 0; j < block.size(); ++j) {
+            block[j] = static_cast<std::uint8_t>((j * 131u) & 0xffu);
+        }
 
         for (int i = 0; i < total; ++i) {
             ZoneScopedN("vsomeip_bench.publish_frame");
             const auto t0 = std::chrono::steady_clock::now();
-            const std::uint64_t send_ns = vsomeip_bench::NowNs();
-            {
-                ZoneScopedN("vsomeip_bench.stamp");
-                StampPayload(body.data(), body.size(), send_ns, seq);
-            }
-            const auto chunks = FragmentPayload(seq, body.data(), body.size(), opt_.max_datagram);
-            TracyPlot("bench.fragments_per_frame", static_cast<int64_t>(chunks.size()));
+            WriteChunkHeaders(block, seq, plan);
+            StampSendNs(block, vsomeip_bench::NowNs());
 
-            for (const auto& chunk : chunks) {
+            for (std::size_t c = 0; c < plan.count; ++c) {
                 ZoneScopedN("vsomeip_bench.notify");
+                const std::size_t off = c * plan.len;
+                const std::size_t n = std::min(plan.len, block.size() - off);
                 auto payload = vsomeip::runtime::get()->create_payload();
-                payload->set_data(chunk);
-                app_->notify(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, payload);
+#if defined(VSOMEIP_BENCH_COVESA_E2E_HOLES)
+                // COVESA protects in place, so every notified payload needs the E2E hole in front.
+                std::vector<std::uint8_t> buf(vsomeip_bench::kE2eHoleBytes + n);
+                std::memcpy(buf.data() + vsomeip_bench::kE2eHoleBytes, block.data() + off, n);
+                payload->set_data(std::move(buf));
+#else
+                payload->set_data(block.data() + off, static_cast<vsomeip::length_t>(n));
+#endif
+                app_->notify(vsomeip_bench::kServiceId, vsomeip_bench::kInstanceId, vsomeip_bench::kEventId, std::move(payload));
             }
             ++seq;
             const auto t1 = std::chrono::steady_clock::now();
@@ -131,6 +151,10 @@ class EventService {
 int main(int argc, char** argv) {
     Options opt;
     if (!ParseOptions(argc, argv, &opt)) {
+        return 2;
+    }
+    if (opt.size < vsomeip_bench::kMinFrameBytes) {
+        std::fprintf(stderr, "--size must be >= %zu\n", vsomeip_bench::kMinFrameBytes);
         return 2;
     }
     if (opt.stack.empty()) {

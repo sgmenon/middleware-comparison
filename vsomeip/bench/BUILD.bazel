@@ -30,39 +30,20 @@ _VSOMEIP_SGMENON_DEPS = [
 # buildifier: disable=no-effect
 [
     cc_binary(
-        name = "event_client_{repo}".format(repo = repo),
-        srcs = ["event_client.cc"],
+        name = "event_{role}_{repo}".format(
+            repo = repo,
+            role = role,
+        ),
+        srcs = ["event_{role}.cc".format(role = role)],
+        copts = copts,
         data = data,
         deps = [":bench_common_lib"] + deps,
     )
-    for repo, deps, data in [
-        (
-            "covesa",
-            _VSOMEIP_COVESA_DEPS,
-            [
-                "@vsomeip_covesa//:vsomeip3-cfg",
-                "@vsomeip_covesa//:vsomeip3-sd",
-                "@vsomeip_covesa//:vsomeip3-e2e",
-            ],
-        ),
-        (
-            "sgmenon",
-            _VSOMEIP_SGMENON_DEPS,
-            [
-                "@vsomeip_sgmenon//:vsomeip3-cfg",
-                "@vsomeip_sgmenon//:vsomeip3-sd",
-                "@vsomeip_sgmenon//:vsomeip3-e2e",
-            ],
-        ),
+    for role in [
+        "client",
+        "service",
     ]
-] + [
-    cc_binary(
-        name = "event_service_{repo}".format(repo = repo),
-        srcs = ["event_service.cc"],
-        data = data,
-        deps = [":bench_common_lib"] + deps,
-    )
-    for repo, deps, data in [
+    for repo, deps, data, copts in [
         (
             "covesa",
             _VSOMEIP_COVESA_DEPS,
@@ -71,6 +52,8 @@ _VSOMEIP_SGMENON_DEPS = [
                 "@vsomeip_covesa//:vsomeip3-sd",
                 "@vsomeip_covesa//:vsomeip3-e2e",
             ],
+            # In-place P04: apps reserve the E2E hole on send and skip it on receive.
+            ["-DVSOMEIP_BENCH_COVESA_E2E_HOLES"],
         ),
         (
             "sgmenon",
@@ -80,6 +63,7 @@ _VSOMEIP_SGMENON_DEPS = [
                 "@vsomeip_sgmenon//:vsomeip3-sd",
                 "@vsomeip_sgmenon//:vsomeip3-e2e",
             ],
+            [],
         ),
     ]
 ]

@@ -5,17 +5,22 @@ Generated **{{ date_utc }}** from `mw-benchmark` @ `{{ git_sha }}`.
 Harness: `vsomeip/docker/run.sh` (2-container bridge, pub `172.29.0.3`, sub `172.29.0.2`).
 Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing host.
 
-**Metric:** one-way latency for a **full frame** — one reassembled event payload (`size` bytes), stamped before send and timed after reassembly (µs). Each run records a **distribution** over `count`={{ count }} samples (warmup={{ warmup }}). Publish **rate (Hz)** is a fixed pace so frames do not pile up; it is not swept (use a different harness if you care about CPU vs rate).
+**Metric:** one-way latency for a **full frame** (`size` bytes), from immediately before the first `notify` until the complete frame reaches the subscriber (µs). UDP uses multiple user-space chunks; TCP uses one event notification. The UDP subscriber tracks chunk order but does not reassemble or copy frame data. Each run records a distribution after {{ warmup }} warmup frames. Publish **rate (Hz)** is a fixed pace so frames do not pile up; it is not swept.
 
-Append-only history: **`{{ history_csv }}`**. This page: run **`{{ run_label }}`**.
+{% for dataset in datasets %}
+## {{ dataset.transport | upper }}
 
-| stack | frame (B) | rate (Hz) | n | mean (µs) | p50 (µs) | p99 (µs) | gaps |
-|-------|-----------|-----------|---|-----------|----------|----------|------|
-{% for r in rows -%}
-| {{ r.stack }} | {{ r.size }} | {{ r.rate_hz }} | {{ r.n }} | {{ r.mean_us }} | {{ r.p50_us }} | {{ r.p99_us }} | {{ r.gap_count }} |
+Data source **`{{ dataset.history_csv }}`**. This section: run **`{{ dataset.run_label }}`**.
+
+| frame | rate (Hz) | n | latency statistic | 3.6.1 latency | sgmenon latency |
+|-------|-----------|---|-----------|--------|---------|
+{% for r in dataset.comparisons -%}
+| {{ r.size_label }} ({{ r.size }} B) | {{ r.rate_hz }} | {{ r.n }} | mean (µs) | {{ r.cov_mean_us }} | {{ r.sgm_mean_us }} |
+|  |  |  | p99 (µs) | {{ r.cov_p99_us }} | {{ r.sgm_p99_us }} |
+|  |  |  | sgmenon mean improvement | — | {{ r.sgm_improvement }} |
 {% endfor %}
 
-## Frame latency vs payload size (mean of samples)
+### Frame latency vs payload size (mean of samples)
 
 Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
 
@@ -30,12 +35,12 @@ config:
       labelRotation: 30
 ---
 xychart-beta
-    title "UDP event notify — mean frame latency (µs)"
-{% if size_labels %}
-    x-axis [{{ size_labels | join(', ') }}]
-    y-axis "µs" 0 --> {{ chart_y_max }}
-    line "covesa" [{{ covesa_line }}]
-    line "sgmenon" [{{ sgmenon_line }}]
+    title "{{ dataset.transport | upper }} event notify — mean frame latency (µs)"
+{% if dataset.size_labels %}
+    x-axis [{{ dataset.size_labels | join(', ') }}]
+    y-axis "µs" 0 --> {{ dataset.chart_y_max }}
+    line "covesa" [{{ dataset.covesa_line }}]
+    line "sgmenon" [{{ dataset.sgmenon_line }}]
 {% else %}
     x-axis [no data]
     y-axis "µs" 0 --> 1
@@ -44,8 +49,9 @@ xychart-beta
 {% endif %}
 ```
 
-Raw CSV:
+Raw {{ dataset.transport | upper }} CSV:
 
 ```csv
-{{ csv_raw }}
+{{ dataset.csv_raw }}
 ```
+{% endfor %}

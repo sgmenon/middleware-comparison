@@ -1,11 +1,14 @@
 #pragma once
 
+#include "constants.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,11 +22,13 @@ inline std::uint64_t NowNs() {
 
 struct Options {
     std::string stack;
+    std::string transport = "udp";
     std::size_t size = 4096;
     int count = 1000;
     int warmup = 50;
     double rate_hz = 1000.0;
     std::size_t max_datagram = 1400;
+    int rpc_calls = 0;
 };
 
 inline bool StartsWith(std::string_view s, std::string_view p) {
@@ -51,10 +56,15 @@ inline bool ParseOptions(int argc, char** argv, Options* out) {
             out->max_datagram = static_cast<std::size_t>(std::strtoull(v, nullptr, 10));
         } else if (const char* v = take("--stack=")) {
             out->stack = v;
+        } else if (const char* v = take("--transport=")) {
+            out->transport = v;
+        } else if (const char* v = take("--rpc-calls=")) {
+            out->rpc_calls = std::atoi(v);
         } else if (a == "--help" || a == "-h") {
             std::fprintf(stderr,
                          "Usage: %s [--size=N] [--count=N] [--warmup=N] "
-                         "[--rate-hz=F] [--max-datagram=N] [--stack=NAME]\n",
+                         "[--rate-hz=F] [--max-datagram=N] [--stack=NAME] "
+                         "[--transport=udp|tcp] [--rpc-calls=N]\n",
                          argv[0]);
             return false;
         } else {
@@ -62,8 +72,12 @@ inline bool ParseOptions(int argc, char** argv, Options* out) {
             return false;
         }
     }
-    if (out->size == 0 || out->count <= 0 || out->rate_hz <= 0) {
-        std::fprintf(stderr, "invalid size/count/rate-hz\n");
+    if (out->size < kBenchHeaderBytes || out->count <= 0 || out->rate_hz <= 0) {
+        std::fprintf(stderr, "invalid size/count/rate-hz (size must be >= %zu)\n", kBenchHeaderBytes);
+        return false;
+    }
+    if (out->transport != "udp" && out->transport != "tcp") {
+        std::fprintf(stderr, "transport must be udp or tcp\n");
         return false;
     }
     return true;
@@ -112,23 +126,22 @@ inline void TouchBenchSubDone() {
 }
 
 inline void StampPayload(std::uint8_t* data, std::size_t length, std::uint64_t send_ns, std::uint32_t seq) {
-    if (length >= 8) {
-        std::memcpy(data, &send_ns, 8);
+    if (length < kBenchHeaderBytes) {
+        return;
     }
-    if (length >= 12) {
-        std::memcpy(data + 8, &seq, 4);
-    }
-    for (std::size_t i = 16; i < length; ++i) {
+    std::memcpy(data + kBenchSendNsOffset, &send_ns, 8);
+    std::memcpy(data + kBenchSeqOffset, &seq, 4);
+    for (std::size_t i = kBenchHeaderBytes; i < length; ++i) {
         data[i] = static_cast<std::uint8_t>((i * 131u + seq) & 0xffu);
     }
 }
 
 inline bool ReadStamp(const std::uint8_t* data, std::size_t length, std::uint64_t* send_ns, std::uint32_t* seq) {
-    if (length < 12) {
+    if (length < kBenchHeaderBytes) {
         return false;
     }
-    std::memcpy(send_ns, data, 8);
-    std::memcpy(seq, data + 8, 4);
+    std::memcpy(send_ns, data + kBenchSendNsOffset, 8);
+    std::memcpy(seq, data + kBenchSeqOffset, 4);
     return true;
 }
 

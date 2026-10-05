@@ -33,6 +33,7 @@ services:
       BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
       ROLE: service
       STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-udp}
       SIZE: ${SIZE:-4096}
       COUNT: ${COUNT:-1000}
       RATE_HZ: ${RATE_HZ:-1000}
@@ -76,8 +77,10 @@ services:
       BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
       ROLE: client
       STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-udp}
       SIZE: ${SIZE:-4096}
       COUNT: ${COUNT:-1000}
+      RPC_CALLS: ${RPC_CALLS:-0}
       RATE_HZ: ${RATE_HZ:-1000}
       WARMUP: ${WARMUP:-50}
       VSOMEIP_TRACY: ${VSOMEIP_TRACY:-}

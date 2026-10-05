@@ -7,7 +7,7 @@ SNAPSHOT_CSV_HEADER="recorded_utc,git_sha,run_label,count,warmup,stack,size,rate
 snapshot_csv_ensure() {
   local path="$1"
   mkdir -p "$(dirname "${path}")"
-  if [[ ! -f "${path}" ]]; then
+  if [[ ! -s "${path}" ]]; then
     echo "${SNAPSHOT_CSV_HEADER}" > "${path}"
   fi
 }
