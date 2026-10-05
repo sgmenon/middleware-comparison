@@ -20,7 +20,7 @@ Data source **`{{ dataset.history_csv }}`**. This section: run **`{{ dataset.run
 |  |  |  | sgmenon mean improvement | — | {{ r.sgm_improvement }} |
 {% endfor %}
 
-### Frame latency vs payload size (mean of samples)
+### Frame latency vs payload size (mean of samples) over `{{dataset.transport|upper}}`
 
 Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
 

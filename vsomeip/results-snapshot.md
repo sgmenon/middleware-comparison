@@ -1,6 +1,6 @@
 # vsomeip benchmark snapshot
 
-Generated **2026-10-05 17:53 UTC** from `mw-benchmark` @ `1bbfdad`.
+Generated **2026-10-05 19:48 UTC** from `mw-benchmark` @ `f12b933`.
 
 Harness: `vsomeip/docker/run.sh` (2-container bridge, pub `172.29.0.3`, sub `172.29.0.2`).
 Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing host.
@@ -38,7 +38,7 @@ Data source **`/home/siddharth.menon/repos/mw-benchmark/bench_results/vsomeip/sn
 |                    |           |     | p99 (µs)                 | 181042.781    | 64947.899       |
 |                    |           |     | sgmenon mean improvement | —             | 59.6%           |
 
-### Frame latency vs payload size (mean of samples)
+### Frame latency vs payload size (mean of samples) over `TCP`
 
 Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
 
@@ -114,7 +114,7 @@ Data source **`/home/siddharth.menon/repos/mw-benchmark/bench_results/vsomeip/sn
 |                    |           |     | p99 (µs)                 | 490963.294    | 453322.815      |
 |                    |           |     | sgmenon mean improvement | —             | 9.4%            |
 
-### Frame latency vs payload size (mean of samples)
+### Frame latency vs payload size (mean of samples) over `UDP`
 
 Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
 

@@ -1,8 +1,8 @@
 # Comparing automotive middleware
 
-Let's talk about how GM chose a middleware for its next-generation vehicles.
+Let's talk about how how to choose a middleware for a next-generation ADAS Stack. Modern Vehicle Architectures embody the [SDV](https://en.wikipedia.org/wiki/Software_Defined_Vehicle) concept and have fewer ECUs, and some seriously beefy compute nodes doing the heavy ADAS lifting.
 
-The next generation is [SDV2](https://news.gm.com/home.detail.html/Pages/news/us/en/2025/oct/1022-SDV-GM-centralized-vehicle-computer-platform-electric-gas-vehicles.html) — fewer ECUs, and some seriously beefy compute nodes (think NVIDIA Thors) doing the heavy ADAS lifting. Some of the challenges that a middlware supporting an ADAS stack has to deal with are:
+Some of the challenges that a middleware supporting an ADAS stack has to deal with are:
 
 - It needs to wrangling huge amounts of data (from large sensor data, to model features maps getting shared).
 - Theres's a lot of chatter going on, and there are many routes to deliver the messages. The middleware needs to always choose the smartest route.
@@ -16,7 +16,8 @@ On the HPC side, life is pretty good: shared memory, big payloads, high-level OS
 
 On the MCU side, a lot of boards run classic AUTOSAR, and even the ones that don't often still define their data exchange with ARXML. So the path of least resistance is **SOME/IP** — it's what those teams already speak.
 
-SOME/IP is a middleware in its own right, and honestly not a great fit for most of what we want on the HPC side. So we weren't trying to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP efficiently (most MCU comms tends to use pretty small PDU anway).
+SOME/IP is a middleware in its own right, and not a bad one by any means but it is not a great fit for most of what we want on the HPC side. Primarily because it was never designed to solve the use cases of an ADAS Stack.
+Given how deeply SOME/IP is entrenched in the Automotive DNA, we shouldn't try to rip SOME/IP out of the car. The real problem is: pick something good for the ADAS nodes, then bridge it to SOME/IP efficiently (most MCU comms tends to use pretty small PDU anyway).
 
 Data oriented design is a cornerstone of our software architecture, so Topic based Pub/Sub and RPCs with the middleware of choice is the preferred form of communication (which doesn't fit seamlessly with the SOME/IP model), so we decided that SOME/IP should effectively be abstracted away as a low level routing implementation detail to the average ADAS user.
 
@@ -73,9 +74,9 @@ The SOME/IP bridge itself is a whole blog post. For this comparison we just trea
 
 **Variable size.** Variable-sized messages have to play nice with that history model. Resize the channel, and the messages still sitting in history shouldn't just disappear.
 
-**Buffer ownership.** Normal case: the middleware owns the shared-memory history buffers. Awkward case: a camera driver that already wrote into its own memory. If we can't publish from that external buffer, we copy every frame, and that's a bad day. When buffers are external, it's fair that some "middleware manages the pool" features (like certain variable-size behaviors) aren't available.
+**Buffer ownership.** _Normal case_: the middleware owns the shared-memory history buffers. _Sensor data case_: a camera driver that already wrote into its own memory. If we can't publish from that external buffer, we copy every frame, and that is abusing the CPU. When buffers are external, it's fair to support the case that some external "middleware manages a memory pool". But when this happens we have to accept that certain nice features like supporting "variable-size payloads" aren't available.
 
-**E2E checks.** Automotive likes checksums and counters. Users should be able to opt in. Failed checksum → discard by default. On reliable channels, we can still hand the bad message to the client and let them decide.
+**E2E checks.** The Automotive industry has requirements around functional safety checksums and counters. Users should be able to opt in. Failed checksum → discard by default. On reliable channels, we can still hand the bad message to the client and let them decide.
 
 **Python.** We need bindings. Prototyping and testing without them can be painful.
 
@@ -95,7 +96,7 @@ The SOME/IP bridge itself is a whole blog post. For this comparison we just trea
 
 - Filtering on metadata (timestamps, instance IDs) for the rare many-to-many case
 - Priorities — really only matters on the network, and DSCP/PCP usually does the job better than the middleware in my opinion.
-- "Give me the newest message" as a first-class thing (DDS kinda gets there with using reader-side history of 1; Subspace queues are shared, so needs a dedicated API for it)
+- "Give me the newest message" as a first-class concept (DDS kinda gets there with using reader-side history of 1; Subspace queues are shared, so needs a dedicated API for it)
 
 ### Stuff we explicitly don't need
 
@@ -104,7 +105,7 @@ A few crowd favorites didn't make the cut:
 - **Deadline QoS** — the client can do this. It doesn't need to live in the middleware.
 - **Durability QoS** — we don't need late joiners to see history from before they existed.
 - **Lifespan QoS** — fiddly, and easy to do per-message in the serialization layer.
-- **Content filtering in the middleware** — that means the middleware has to understand your serialization, which fights the whole "stay serialization-agnostic" idea. With zero-copy, filtering on the client costs about the same anyway. On the sender side, just use different topics; we don't need that to be dynamic.
+- **Content filtering in the middleware** — that means the middleware has to understand your serialization, which fights the "stay serialization-agnostic" idea. With zero-copy shared memory, filtering on the client costs about the same anyway. On the sender side, just use different topics; we don't need that to be dynamic. Filtering on network based middlware-configurations can of course also be done by just having different "topics per filter configuration"; its a bit more boilerplate but the complexity it prevents is worth it.
 - **Must be peer-to-peer** — DDS's brokerless model is nice (one less thing to crash). But discovery gets ugly: everyone has to find everyone else, and that traffic scales badly (`O(N!)`) even when the packets are small. We'll take a brokered design if it discovers calmly and safety critical comms can survive a broker restart.
 
 ## The shortlist
@@ -130,13 +131,11 @@ When you read the truth table, keep that bias in mind: green cells for zero-copy
 
 **DDS (network-first):** writers and readers each keep their own history — copies unless you use a vendor SHM/loan API.
 
-![DDS topic with per-endpoint history buffers](docs/figures/dds.png)
+![DDS topic with per-endpoint history buffers](docs/figures/dds.drawio.svg)
 
 **Subspace (shm-first):** the channel _is_ the shared history; the server sets it up, and leaving the machine is a TCP bridge between servers.
 
-![Subspace shared channel with TCP bridge between servers](docs/figures/subspace.png)
-
-Editable sources: [`docs/figures/dds.drawio`](docs/figures/dds.drawio), [`docs/figures/subspace.drawio`](docs/figures/subspace.drawio).
+![Subspace shared channel with TCP bridge between servers](docs/figures/subspace.drawio.svg)
 
 ## Platform support
 
@@ -225,7 +224,7 @@ How to run, payload schema, size sweeps, charts, caveats, and Docker net details
 
 ## Summary / verdict
 
-**For GM SDV2 ADAS on Thor-class HPC, Subspace is the clear pick.**
+For a use case which lines up with what I described, **Subspace is the clear pick.**
 
 The deciding factor isn't a microbenchmark — it's about which design aligned best with our needs. Most of our traffic is **same-ECU shared memory** (lidar, cameras, feature maps). Subspace is built around that: channels _are_ shm slots, serialization-agnostic, external buffers, calm server-side discovery, and channels that survive a broker restart. DDS and Zenoh are excellent **network** middlewares that can _also_ do SHM — via iceoryx loans or `zenoh-shm` — but zero-copy is a special path you have to hold carefully, not the default product shape.
 

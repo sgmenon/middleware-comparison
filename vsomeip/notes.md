@@ -160,7 +160,3 @@ TRACY_CLIENT_ADDRESS=172.17.0.1 VSOMEIP_TRACY=1 STACK=sgmenon SIZE=64 COUNT=30 \
 Zones in this repo show **harness vs vsomeip** split (e.g. time inside `notify()` vs gaps before `on_message`). To see routing/UDP inside the stack, rebuild `@vsomeip_sgmenon` / `@vsomeip_covesa` with `--config=tracy` and add `ZoneScopedN` in the library (same pattern as ccu-stack camera code).
 
 Details: `third_party/tracy/README.md`.
-
-```
-
-```
