@@ -1,0 +1,69 @@
+{
+  "unicast": "{{ unicast }}",
+  "netmask": "255.255.255.0",
+  "logging": { "level": "info", "console": "true" },
+  "applications": [
+    { "name": "bench_service", "id": "0x1210" },
+    { "name": "bench_client", "id": "0x3489" },
+    { "name": "routingmanagerd", "id": "0x4000" }
+  ],
+  "e2e": {
+    "e2e_enabled": "true",
+    "protected": [
+      {
+        "service_id": "0xbeef",
+        "event_id": "0x8001",
+        "profile": "P04",
+        "variant": "both",
+        "crc_offset": "{{ crc_offset }}",
+        "data_id": "0xbeef",
+        "max_data_length": "11534336"
+      }
+    ]
+  },
+  "services": [
+    {
+      "service": "0xbeef",
+      "instance": "0x0001",
+      "reliable": {
+        "port": "30509",
+        "enable-magic-cookies": "false"
+      },
+      "unreliable": "30510",
+      "events": [
+        {
+          "event": "0x8001",
+          "is_reliable": "{{ "true" if transport == "tcp" else "false" }}"
+        }
+      ],
+      "eventgroups": [
+        { "eventgroup": "0x0001", "events": ["0x8001"] }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "service": "0xbeef",
+      "instance": "0x0001",
+      "reliable": [40000, 49999],
+      "unreliable": [40000, 49999]
+    }
+  ],
+  "npdu-default-timings": {
+    "debounce-time-request": "0",
+    "debounce-time-response": "0",
+    "max-retention-time-request": "0",
+    "max-retention-time-response": "0"
+  },
+  "routing": "{{ routing }}",
+  "service-discovery": {
+    "enable": "true",
+    "multicast": "224.0.50.1",
+    "port": "30490",
+    "protocol": "udp",
+    "initial_delay_min": "0",
+    "initial_delay_max": "50",
+    "cyclic_offer_delay": "1000",
+    "ttl": "3"
+  }
+}

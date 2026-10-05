@@ -1,0 +1,91 @@
+# Two-container bridge for vsomeip event notify benches (see vsomeip/docker/run.sh).
+# Bazel builds and runs inside each container; repo is bind-mounted at /workspace.
+name: mw_vsomeip
+
+networks:
+  vsomeip_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+services:
+  pub:
+    profiles: [vsomeip]
+    image: mw-vsomeip-bench:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_vsomeip_pub
+    hostname: pub
+    cap_add: [NET_ADMIN]
+    networks:
+      vsomeip_net:
+        ipv4_address: 172.29.0.3
+    volumes:
+      - ${REPO_ROOT:-../..}:/workspace
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:${CONTAINER_HOME:-/home/bench}/.cache
+    environment:
+      HOME: ${CONTAINER_HOME:-/home/bench}
+      HOST_UID: ${HOST_UID}
+      HOST_GID: ${HOST_GID}
+      BENCH_USER: ${BENCH_USER:-bench}
+      BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
+      ROLE: service
+      STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-udp}
+      SIZE: ${SIZE:-4096}
+      COUNT: ${COUNT:-1000}
+      RATE_HZ: ${RATE_HZ:-1000}
+      WARMUP: ${WARMUP:-50}
+      VSOMEIP_TRACY: ${VSOMEIP_TRACY:-}
+      BAZEL_CONFIG_TRACY: ${BAZEL_CONFIG_TRACY:-}
+      TRACY_CLIENT_ADDRESS: ${TRACY_CLIENT_ADDRESS:-}
+      MAX_DATAGRAM: ${MAX_DATAGRAM:-1400}
+      SERVICE_IP: 172.29.0.3
+      CLIENT_IP: 172.29.0.2
+    healthcheck:
+      test: [CMD, test, -f, /tmp/vsomeip-service-ready]
+      interval: 1s
+      timeout: 2s
+      retries: 180
+      start_period: 120s
+
+  sub:
+    profiles: [vsomeip]
+    image: mw-vsomeip-bench:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mw_vsomeip_sub
+    hostname: sub
+    cap_add: [NET_ADMIN]
+    networks:
+      vsomeip_net:
+        ipv4_address: 172.29.0.2
+    volumes:
+      - ${REPO_ROOT:-../..}:/workspace
+      - ${BAZEL_HOST_CACHE:-${HOME}/.cache}:${CONTAINER_HOME:-/home/bench}/.cache
+    depends_on:
+      pub:
+        condition: service_healthy
+    environment:
+      HOME: ${CONTAINER_HOME:-/home/bench}
+      HOST_UID: ${HOST_UID}
+      HOST_GID: ${HOST_GID}
+      BENCH_USER: ${BENCH_USER:-bench}
+      BAZEL_OUTPUT_USER_ROOT: ${CONTAINER_HOME:-/home/bench}/.cache/bazel-output
+      ROLE: client
+      STACK: ${STACK:-sgmenon}
+      TRANSPORT: ${TRANSPORT:-udp}
+      SIZE: ${SIZE:-4096}
+      COUNT: ${COUNT:-1000}
+      RPC_CALLS: ${RPC_CALLS:-0}
+      RATE_HZ: ${RATE_HZ:-1000}
+      WARMUP: ${WARMUP:-50}
+      VSOMEIP_TRACY: ${VSOMEIP_TRACY:-}
+      BAZEL_CONFIG_TRACY: ${BAZEL_CONFIG_TRACY:-}
+      TRACY_CLIENT_ADDRESS: ${TRACY_CLIENT_ADDRESS:-}
+      MAX_DATAGRAM: ${MAX_DATAGRAM:-1400}
+      SERVICE_IP: 172.29.0.3
+      CLIENT_IP: 172.29.0.2

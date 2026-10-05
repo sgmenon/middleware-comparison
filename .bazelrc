@@ -8,6 +8,12 @@ common --features=c++20
 
 build:opt --compilation_mode=opt
 
+# vsomeip/docker: build inside Linux containers (no host staging / manual LD paths).
+build:docker --spawn_strategy=standalone
+build:docker --genrule_strategy=standalone
+build:docker --strategy=Copy=standalone
+build:docker --define=grpc_no_ares=true
+
 build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc13
 build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc11//:cc_toolchain
 
@@ -52,5 +58,14 @@ build:ubsan --platform_suffix=ubsan
 build:debug --compilation_mode=dbg
 build:debug --strip never
 build:debug --platform_suffix=debug
+
+# Tracy client (--config=tracy). See third_party/tracy/README.md and vsomeip/docker/run_profile.sh
+build:tracy --@tracy//:tracy_enabled=true
+build:tracy --strip=never
+
+# Docker bridge → host Tracy: set TRACY_CLIENT_ADDRESS to a reachable host IP (e.g. 172.17.0.1).
+build:tracy_docker --config=tracy
+build:tracy_docker --copt=-DTRACY_ONLY_IPV4
+build:tracy_docker --copt=-DTRACY_NO_BROADCAST
 
 try-import %workspace%/user.bazelrc

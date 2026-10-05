@@ -1,0 +1,11 @@
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 1111111..2222222 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -1,5 +1,6 @@
+ load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
+ load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
++load("@rules_cc//cc:cc_import.bzl", "cc_import")
+ load("@rules_cc//cc:defs.bzl", "cc_library")
+ 
+ licenses(["reciprocal"])  # Mozilla Public License 2.0

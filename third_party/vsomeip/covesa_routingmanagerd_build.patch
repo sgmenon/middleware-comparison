@@ -1,0 +1,27 @@
+diff --git a/examples/routingmanagerd/BUILD.bazel b/examples/routingmanagerd/BUILD.bazel
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/examples/routingmanagerd/BUILD.bazel
+@@ -0,0 +1,21 @@
++load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
++
++cc_binary(
++    name = "routingmanagerd",
++    srcs = ["routingmanagerd.cpp"],
++    data = [
++        "//:vsomeip3-cfg",
++        "//:vsomeip3-e2e",
++        "//:vsomeip3-sd",
++    ],
++    linkopts = [
++        "-Wl,--no-as-needed",
++        "-Wl,-rpath,$$ORIGIN",
++    ],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//:vsomeip",
++        "//:vsomeip-e2e",
++        "//:vsomeip-sd",
++    ],
++)

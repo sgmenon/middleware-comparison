@@ -1,0 +1,57 @@
+# vsomeip benchmark snapshot
+
+Generated **{{ date_utc }}** from `mw-benchmark` @ `{{ git_sha }}`.
+
+Harness: `vsomeip/docker/run.sh` (2-container bridge, pub `172.29.0.3`, sub `172.29.0.2`).
+Each row: **covesa** = `routingmanagerd` + app; **sgmenon** = app-only routing host.
+
+**Metric:** one-way latency for a **full frame** (`size` bytes), from immediately before the first `notify` until the complete frame reaches the subscriber (µs). UDP uses multiple user-space chunks; TCP uses one event notification. The UDP subscriber tracks chunk order but does not reassemble or copy frame data. Each run records a distribution after {{ warmup }} warmup frames. Publish **rate (Hz)** is a fixed pace so frames do not pile up; it is not swept.
+
+{% for dataset in datasets %}
+## {{ dataset.transport | upper }}
+
+Data source **`{{ dataset.history_csv }}`**. This section: run **`{{ dataset.run_label }}`**.
+
+| frame | rate (Hz) | n | latency statistic | 3.6.1 latency | sgmenon latency |
+|-------|-----------|---|-----------|--------|---------|
+{% for r in dataset.comparisons -%}
+| {{ r.size_label }} ({{ r.size }} B) | {{ r.rate_hz }} | {{ r.n }} | mean (µs) | {{ r.cov_mean_us }} | {{ r.sgm_mean_us }} |
+|  |  |  | p99 (µs) | {{ r.cov_p99_us }} | {{ r.sgm_p99_us }} |
+|  |  |  | sgmenon mean improvement | — | {{ r.sgm_improvement }} |
+{% endfor %}
+
+### Frame latency vs payload size (mean of samples) over `{{dataset.transport|upper}}`
+
+Same size ladder as [ReliablePingPong SHM](../../notes/benchmarks.md#results-reliablepingpong-same-process-shm) (64 B … 10 MiB). Lines use **mean**; see table for p50/p99.
+
+```mermaid
+---
+config:
+  xyChart:
+    width: 820
+    height: 420
+    showLegend: true
+    xAxis:
+      labelRotation: 30
+---
+xychart-beta
+    title "{{ dataset.transport | upper }} event notify — mean frame latency (µs)"
+{% if dataset.size_labels %}
+    x-axis [{{ dataset.size_labels | join(', ') }}]
+    y-axis "µs" 0 --> {{ dataset.chart_y_max }}
+    line "covesa" [{{ dataset.covesa_line }}]
+    line "sgmenon" [{{ dataset.sgmenon_line }}]
+{% else %}
+    x-axis [no data]
+    y-axis "µs" 0 --> 1
+    line "covesa" [0]
+    line "sgmenon" [0]
+{% endif %}
+```
+
+Raw {{ dataset.transport | upper }} CSV:
+
+```csv
+{{ dataset.csv_raw }}
+```
+{% endfor %}
