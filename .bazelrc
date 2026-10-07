@@ -6,8 +6,10 @@ common --extra_toolchains=@gcc_toolchain_x86_64-gcc11//:cc_toolchain
 common --compilation_mode=fastbuild
 common --features=c++20
 
+# native won't work with sanitizers
 build:native --host_platform=
 build:native --platforms=
+build:native --platform_suffix=native
 
 build:opt --compilation_mode=opt
 

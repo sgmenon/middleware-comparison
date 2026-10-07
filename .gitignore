@@ -15,3 +15,5 @@ user.bazelrc
 .notes/
 *.pdf
 __pycache__/
+node_modules/
+presentation/

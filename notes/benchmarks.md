@@ -127,7 +127,11 @@ xychart-beta
     bar [2.2, 29, 55, 2.4, 32, 48, 2.5, 33, 40]
 ```
 
-Caveats: Zenoh SHM uses **two sessions** with `Z_LOCALITY_REMOTE`. Cyclone SHM needs RouDi/iceoryx (large-chunk pools bumped for MiB samples). MT benches credit-limit to 2 in flight for both reliable and unreliable. Numbers are `--config=opt` on one Linux host — relative, not a datasheet.
+Caveats: 
+- The MultiThreaded () tests use separate publisher and subscriber threads, with at most two unconsumed messages outstanding. 
+- Zenoh uses separate publisher/subscriber sessions and remote locality so it exercises inter-session SHM rather than same-session delivery via local dispatch (ie same Session object). 
+- Cyclone uses RouDi with static iceoryx pools enlarged for multi-MiB samples (this is less elegant than the dynamic chunk sizing used by Subspace, so it requiers configuration). 
+- Results are optimized-build measurements from one Linux host, intended for relative comparison — not absolute statistics.
 
 ## Network (Docker)
 
